@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Processa Boletins de Urna baixados (zips em data/raw/),
-agrega por seção, junta T1 x T2 e calcula baseline simples.
+agrega por seção, extrai percentuais de candidatos principais,
+junt a T1 x T2 e calcula baseline de transferência proporcional.
 Grava apenas saídas processadas em resultados/.
 """
 
@@ -33,36 +34,58 @@ def load_bu_zip(zip_path: Path) -> pd.DataFrame:
 def to_numeric_safe(s):
     return pd.to_numeric(s, errors="coerce").fillna(0)
 
+def extract_candidate_pcts(df: pd.DataFrame, keys: list, cargo_code: str = None, top_n: int = 3) -> pd.DataFrame:
+    """Extrai percentuais dos principais candidatos por seção."""
+    if "QT_VOTOS" not in df.columns:
+        return pd.DataFrame()
+
+    work = df.copy()
+    work["QT_VOTOS"] = to_numeric_safe(work["QT_VOTOS"])
+
+    # Filtra por cargo se informado (1 = presidente)
+    if cargo_code and "CD_CARGO" in work.columns:
+        work = work[work["CD_CARGO"] == cargo_code]
+
+    if work.empty:
+        return pd.DataFrame()
+
+    # Total de votos por seção
+    totals = work.groupby(keys)["QT_VOTOS"].sum().reset_index().rename(columns={"QT_VOTOS": "TOTAL_VOTOS"})
+
+    # Top candidatos por volume total
+    cand_totals = work.groupby(["NR_VOTAVEL", "NM_VOTAVEL"])["QT_VOTOS"].sum().reset_index()
+    top_cands = cand_totals.nlargest(top_n, "QT_VOTOS")["NR_VOTAVEL"].tolist()
+
+    result = totals.copy()
+    for nr in top_cands:
+        name = cand_totals.loc[cand_totals["NR_VOTAVEL"] == nr, "NM_VOTAVEL"].iloc[0]
+        safe_name = "".join(c if c.isalnum() else "_" for c in str(name)[:30])
+        col = f"PCT_{safe_name}"
+        cand_votes = work[work["NR_VOTAVEL"] == nr].groupby(keys)["QT_VOTOS"].sum().reset_index()
+        cand_votes = cand_votes.merge(totals, on=keys, how="left")
+        cand_votes[col] = (cand_votes["QT_VOTOS"] / cand_votes["TOTAL_VOTOS"].replace(0, pd.NA)) * 100
+        result = result.merge(cand_votes[keys + [col]], on=keys, how="left")
+
+    return result
+
 def aggregate_section(df: pd.DataFrame, label: str) -> pd.DataFrame:
-    """Agrega o formato longo do BU para uma linha por seção."""
     keys = [c for c in SECTION_KEYS if c in df.columns]
     if not keys:
         raise ValueError(f"Chaves de seção não encontradas em {label}")
 
-    # Colunas de quantidade comuns
-    vote_col = None
-    for c in ["QT_VOTOS", "QT_VOTOS_NOMINAIS", "QT_VOTOS_BRANCOS", "QT_VOTOS_NULOS"]:
-        if c in df.columns:
-            vote_col = c
-            break
+    agg = df.groupby(keys, as_index=False).size().rename(columns={"size": "linhas"})
 
-    agg = df.groupby(keys, as_index=False).agg(
-        linhas=("NR_SECAO", "size") if "NR_SECAO" in df.columns else (keys[0], "size")
-    )
-
-    # Comparecimento / aptos (se existirem, são constantes por seção)
     for col in ["QT_COMPARECIMENTO", "QT_APTOS", "QT_ABSTENCOES"]:
         if col in df.columns:
             tmp = df.groupby(keys)[col].first().reset_index()
             tmp[col] = to_numeric_safe(tmp[col])
             agg = agg.merge(tmp, on=keys, how="left")
 
-    # Total de votos nominais se houver coluna de votos
-    if vote_col and vote_col in df.columns:
-        votes = df.copy()
-        votes[vote_col] = to_numeric_safe(votes[vote_col])
-        total = votes.groupby(keys)[vote_col].sum().reset_index().rename(columns={vote_col: "QT_VOTOS_TOTAL"})
-        agg = agg.merge(total, on=keys, how="left")
+    # Extrai percentuais (presidente no T2, ou top no T1)
+    is_t2 = "2t" in label.lower()
+    pcts = extract_candidate_pcts(df, keys, cargo_code="1" if is_t2 else None, top_n=2 if is_t2 else 3)
+    if not pcts.empty:
+        agg = agg.merge(pcts, on=keys, how="left")
 
     agg["origem"] = label
     return agg
@@ -87,20 +110,19 @@ def main():
                 "arquivo": label,
                 "linhas_brutas": len(raw),
                 "secoes": len(sec),
-                "colunas_secao": list(sec.columns),
+                "colunas": list(sec.columns),
             })
             print(f"  -> {len(raw)} linhas brutas → {len(sec)} seções")
         except Exception as e:
             print(f"  ERRO: {e}")
             reports.append({"arquivo": zp.name, "erro": str(e)})
 
-    # Resumo
     with open(RESULTS / "resumo_secoes.txt", "w", encoding="utf-8") as f:
-        f.write("Agregação por seção\n" + "="*40 + "\n\n")
+        f.write("Agregação por seção + percentuais\n" + "="*40 + "\n\n")
         for r in reports:
             f.write(str(r) + "\n\n")
 
-    # Join T1 x T2
+    # Join T1 x T2 e baseline
     t1_keys = [k for k in section_dfs if "1t" in k]
     t2_keys = [k for k in section_dfs if "2t" in k]
 
@@ -120,12 +142,11 @@ def main():
         merged = df1.merge(df2, on=keys, how="inner", suffixes=("_t1", "_t2"))
         print(f"Join {uf}: {len(merged)} seções")
 
-        # Baseline simples: proporção de comparecimento
+        # Baseline: transferência proporcional de comparecimento
         if "QT_COMPARECIMENTO_t1" in merged.columns and "QT_COMPARECIMENTO_t2" in merged.columns:
             merged["diff_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] - merged["QT_COMPARECIMENTO_t1"]
             merged["razao_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] / merged["QT_COMPARECIMENTO_t1"].replace(0, pd.NA)
 
-        # Salva resumo do join (não o dataset completo)
         summary = {
             "uf": uf,
             "secoes_join": len(merged),
@@ -135,11 +156,16 @@ def main():
             summary["diff_comp_media"] = float(merged["diff_comparecimento"].mean())
             summary["diff_comp_mediana"] = float(merged["diff_comparecimento"].median())
 
+        # Lista colunas de percentual encontradas
+        pct_cols = [c for c in merged.columns if c.startswith("PCT_")]
+        summary["colunas_pct"] = pct_cols
+
         with open(RESULTS / f"join_{uf}_resumo.txt", "w", encoding="utf-8") as f:
             f.write(str(summary) + "\n")
 
-        # Amostra pequena
-        merged.head(10).to_csv(RESULTS / f"amostra_secao_{uf}.csv", index=False, sep=";")
+        # Amostra com percentuais
+        sample_cols = keys + [c for c in merged.columns if "PCT_" in c or "COMPARECIMENTO" in c or "diff_" in c]
+        merged[sample_cols].head(10).to_csv(RESULTS / f"amostra_secao_{uf}.csv", index=False, sep=";")
 
     print(f"\nResultados em {RESULTS.resolve()}")
 
