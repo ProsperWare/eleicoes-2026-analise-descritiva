@@ -25,9 +25,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas
 
-      - name: Download BUs (exemplo limitado)
+      - name: Download BUs (GO e MG)
         run: |
-          python scripts/download_bu.py --ufs AC
+          python scripts/download_bu.py --ufs GO MG
         continue-on-error: true  # não falha o job se já tiver baixado ou houver problema de rede
 
       - name: Processar e gerar resultados
