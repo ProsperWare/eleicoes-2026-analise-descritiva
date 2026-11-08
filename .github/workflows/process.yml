@@ -23,7 +23,7 @@ jobs:
       - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
-          pip install pandas
+          pip install pandas scikit-learn
 
       - name: Download BUs (GO e MG)
         run: |
