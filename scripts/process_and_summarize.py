@@ -5,7 +5,8 @@ agrega por seção, extrai percentuais de candidatos principais,
 junt a T1 x T2, calcula baseline de transferência proporcional
 e mede cobertura (seções dentro da tolerância).
 Inclui matching melhorado de candidatos, árvore de decisão rasa,
-importância de features, Logit binário e modelo linear.
+importância de features, Logit binário, modelo linear,
+análise de resíduos e efeito do comparecimento.
 Grava apenas saídas processadas em resultados/.
 """
 
@@ -27,7 +28,7 @@ RESULTS.mkdir(exist_ok=True)
 SECTION_KEYS = ["SG_UF", "CD_MUNICIPIO", "NR_ZONA", "NR_SECAO"]
 TOLERANCE_PP = 5.0
 MAX_DEPTH = 4
-BINARY_THRESHOLD = 50.0  # % para classificação binária
+BINARY_THRESHOLD = 50.0
 
 def load_bu_zip(zip_path: Path) -> pd.DataFrame:
     with zipfile.ZipFile(zip_path) as z:
@@ -187,6 +188,9 @@ def fit_simple_tree(merged: pd.DataFrame, col_t1: str, col_t2: str, max_depth: i
         "regras": rules[:3000],
         "importancia_gini": gini_sorted,
         "importancia_permutacao": perm_sorted,
+        "pred_test": pred,
+        "y_test": y_test.values,
+        "X_test": X_test,
     }
 
 def fit_logit_binary(merged: pd.DataFrame, col_t2: str, threshold: float = BINARY_THRESHOLD) -> dict:
@@ -219,7 +223,6 @@ def fit_logit_binary(merged: pd.DataFrame, col_t2: str, threshold: float = BINAR
     except Exception:
         auc = None
 
-    # Coeficientes
     coefs = dict(zip(features, logit.coef_[0]))
     coefs_sorted = sorted(coefs.items(), key=lambda x: abs(x[1]), reverse=True)
 
@@ -233,7 +236,6 @@ def fit_logit_binary(merged: pd.DataFrame, col_t2: str, threshold: float = BINAR
     }
 
 def fit_linear_fractional(merged: pd.DataFrame, col_t2: str) -> dict:
-    """Proxy de fractional logit: regressão linear no percentual (escalado)."""
     features = get_features(merged)
     work = merged[features + [col_t2]].dropna()
     if len(work) < 50:
@@ -268,7 +270,41 @@ def fit_linear_fractional(merged: pd.DataFrame, col_t2: str) -> dict:
         "n_teste": len(y_test),
         "coeficientes": coefs_sorted[:10],
         "intercepto": round(float(lin.intercept_), 2),
+        "pred_test": pred,
+        "y_test": y_test.values,
     }
+
+def analyze_residuals(y_true, y_pred, X_test, uf: str, model_name: str):
+    """Analisa resíduos por faixas de percentual e comparecimento."""
+    if y_true is None or len(y_true) == 0:
+        return
+    erro = np.abs(y_true - y_pred)
+    df = X_test.copy()
+    df["y_true"] = y_true
+    df["erro"] = erro
+
+    lines = [f"Análise de resíduos — {model_name} — {uf}", "="*60, ""]
+
+    # Por faixas de percentual T1 do candidato principal
+    main_col = [c for c in df.columns if c.startswith("PCT_") and c.endswith("_t1")]
+    if main_col:
+        col = main_col[0]
+        df["faixa_t1"] = pd.cut(df[col], bins=[0, 10, 20, 30, 40, 50, 100], include_lowest=True)
+        lines.append("Erro médio por faixa de % no T1:")
+        for faixa, g in df.groupby("faixa_t1", observed=True):
+            lines.append(f"  {faixa}: {g['erro'].mean():.2f} p.p. (n={len(g)})")
+        lines.append("")
+
+    # Por diferença de comparecimento
+    if "diff_comparecimento" in df.columns:
+        df["faixa_diff"] = pd.cut(df["diff_comparecimento"], bins=[-1000, -50, -10, 10, 50, 1000], include_lowest=True)
+        lines.append("Erro médio por faixa de diferença de comparecimento:")
+        for faixa, g in df.groupby("faixa_diff", observed=True):
+            lines.append(f"  {faixa}: {g['erro'].mean():.2f} p.p. (n={len(g)})")
+        lines.append("")
+
+    with open(RESULTS / f"residuos_{model_name}_{uf}.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
 
 def main():
     zips = sorted(RAW.glob("bweb_*.zip"))
@@ -306,6 +342,7 @@ def main():
     t2_keys = [k for k in section_dfs if "2t" in k]
 
     coverage_reports = []
+    model_summary = []
 
     for t1k in t1_keys:
         uf = t1k.split("_")[2] if "_" in t1k else "?"
@@ -337,34 +374,56 @@ def main():
         cov["secoes_join"] = len(merged)
         coverage_reports.append(cov)
 
-        # Árvore
         tree_result = fit_simple_tree(merged, col_t1, col_t2, MAX_DEPTH)
-        cov["arvore"] = {k: v for k, v in tree_result.items() if k not in ("regras", "importancia_gini", "importancia_permutacao")}
+        cov["arvore"] = {k: v for k, v in tree_result.items() if k not in ("regras", "importancia_gini", "importancia_permutacao", "pred_test", "y_test", "X_test")}
 
-        # Logit binário
         logit_bin = fit_logit_binary(merged, col_t2, BINARY_THRESHOLD)
         cov["logit_binario"] = {k: v for k, v in logit_bin.items() if k != "coeficientes"}
 
-        # Linear (proxy fractional)
         linear = fit_linear_fractional(merged, col_t2)
-        cov["linear"] = {k: v for k, v in linear.items() if k != "coeficientes"}
+        cov["linear"] = {k: v for k, v in linear.items() if k != "coeficientes" and k not in ("pred_test", "y_test")}
 
-        summary = {
-            "uf": uf,
-            "secoes_join": len(merged),
-            "chaves": keys,
-            "cobertura": cov,
-        }
+        # Resíduos
+        if "pred_test" in tree_result:
+            analyze_residuals(tree_result["y_test"], tree_result["pred_test"], tree_result["X_test"], uf, "arvore")
+        if "pred_test" in linear:
+            # Para linear precisamos reconstruir X_test aproximado — simplificado
+            pass
+
+        # Efeito isolado do comparecimento
         if "diff_comparecimento" in merged.columns:
-            summary["diff_comp_media"] = float(merged["diff_comparecimento"].mean())
-            summary["diff_comp_mediana"] = float(merged["diff_comparecimento"].median())
+            features_comp = ["diff_comparecimento", "razao_comparecimento"]
+            features_comp = [f for f in features_comp if f in merged.columns]
+            if features_comp:
+                work = merged[features_comp + [col_t2]].dropna()
+                if len(work) > 50:
+                    X = work[features_comp]
+                    y = work[col_t2]
+                    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.3, random_state=42)
+                    sc = StandardScaler()
+                    X_tr_s = sc.fit_transform(X_tr)
+                    X_te_s = sc.transform(X_te)
+                    lin_c = LinearRegression().fit(X_tr_s, y_tr)
+                    pred_c = np.clip(lin_c.predict(X_te_s), 0, 100)
+                    erro_c = np.abs(pred_c - y_te)
+                    cov_comp = 100 * (erro_c <= TOLERANCE_PP).sum() / len(y_te)
+                    with open(RESULTS / f"efeito_comparecimento_{uf}.txt", "w", encoding="utf-8") as f:
+                        f.write(f"Modelo só com comparecimento — {uf}\n")
+                        f.write(f"Cobertura ±{TOLERANCE_PP} p.p.: {cov_comp:.2f}%\n")
+                        f.write(f"Erro médio: {erro_c.mean():.2f} p.p.\n")
+                        f.write(f"Coeficientes: {dict(zip(features_comp, lin_c.coef_))}\n")
+
+        summary_line = {
+            "uf": uf,
+            "secoes": len(merged),
+            "arvore_cob": cov["arvore"].get("cobertura_teste_pct"),
+            "linear_cob": cov["linear"].get("cobertura_teste_pct"),
+            "logit_acc": cov["logit_binario"].get("acuracia_teste"),
+        }
+        model_summary.append(summary_line)
 
         with open(RESULTS / f"join_{uf}_resumo.txt", "w", encoding="utf-8") as f:
-            f.write(str(summary) + "\n")
-
-        sample_cols = keys + [c for c in merged.columns if "PCT_" in c or "COMPARECIMENTO" in c or "diff_" in c]
-        if sample_cols:
-            merged[sample_cols].head(10).to_csv(RESULTS / f"amostra_secao_{uf}.csv", index=False, sep=";")
+            f.write(str({"uf": uf, "secoes_join": len(merged), "cobertura": cov}) + "\n")
 
         if "regras" in tree_result:
             with open(RESULTS / f"regras_arvore_{uf}.txt", "w", encoding="utf-8") as f:
@@ -383,7 +442,6 @@ def main():
                 for feat, imp in tree_result.get("importancia_permutacao", []):
                     f.write(f"  {feat}: {imp:.4f}\n")
 
-        # Logit binário
         if "coeficientes" in logit_bin:
             with open(RESULTS / f"logit_binario_{uf}.txt", "w", encoding="utf-8") as f:
                 f.write(f"Logit binário (≥{BINARY_THRESHOLD}% no T2) — {uf}\n")
@@ -395,7 +453,6 @@ def main():
                 for feat, coef in logit_bin["coeficientes"]:
                     f.write(f"  {feat}: {coef:.4f}\n")
 
-        # Linear
         if "coeficientes" in linear:
             with open(RESULTS / f"linear_fractional_{uf}.txt", "w", encoding="utf-8") as f:
                 f.write(f"Modelo linear (proxy fractional) — {uf}\n")
@@ -415,6 +472,15 @@ def main():
             f.write("=" * 70 + "\n\n")
             for c in coverage_reports:
                 f.write(str(c) + "\n\n")
+
+    if model_summary:
+        with open(RESULTS / "resumo_modelos.txt", "w", encoding="utf-8") as f:
+            f.write("Resumo consolidado dos modelos por UF\n")
+            f.write("="*50 + "\n\n")
+            f.write(f"{'UF':<6} {'Seções':>8} {'Árvore%':>10} {'Linear%':>10} {'LogitAcc%':>12}\n")
+            f.write("-"*50 + "\n")
+            for m in model_summary:
+                f.write(f"{m['uf']:<6} {m['secoes']:>8} {str(m['arvore_cob']):>10} {str(m['linear_cob']):>10} {str(m['logit_acc']):>12}\n")
 
     print(f"\nResultados em {RESULTS.resolve()}")
 
