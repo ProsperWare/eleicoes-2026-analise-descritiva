@@ -68,3 +68,27 @@ jobs:
           echo "========== importancia_features_MG.txt =========="
           cat resultados/importancia_features_MG.txt || true
           echo ""
+
+      - name: Imprimir Logit binário GO
+        run: |
+          echo "========== logit_binario_GO.txt =========="
+          cat resultados/logit_binario_GO.txt || true
+          echo ""
+
+      - name: Imprimir Logit binário MG
+        run: |
+          echo "========== logit_binario_MG.txt =========="
+          cat resultados/logit_binario_MG.txt || true
+          echo ""
+
+      - name: Imprimir Linear GO
+        run: |
+          echo "========== linear_fractional_GO.txt =========="
+          cat resultados/linear_fractional_GO.txt || true
+          echo ""
+
+      - name: Imprimir Linear MG
+        run: |
+          echo "========== linear_fractional_MG.txt =========="
+          cat resultados/linear_fractional_MG.txt || true
+          echo ""
