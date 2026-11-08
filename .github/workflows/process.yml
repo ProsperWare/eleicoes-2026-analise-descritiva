@@ -67,9 +67,9 @@ jobs:
           pip install -r requirements.txt
           echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
 
-      - name: Download BUs (GO e MG)
+      - name: Download BUs (todas as UFs)
         run: |
-          python scripts/download_bu.py --ufs GO MG
+          python scripts/download_bu.py --all
         continue-on-error: true  # não falha o job se já tiver baixado ou houver problema de rede
 
       - name: Processar e gerar resultados
@@ -85,52 +85,4 @@ jobs:
         run: |
           echo "========== cobertura_baseline.txt =========="
           cat resultados/cobertura_baseline.txt || true
-          echo ""
-
-      - name: Imprimir regras árvore GO
-        run: |
-          echo "========== regras_arvore_GO.txt =========="
-          cat resultados/regras_arvore_GO.txt || true
-          echo ""
-
-      - name: Imprimir regras árvore MG
-        run: |
-          echo "========== regras_arvore_MG.txt =========="
-          cat resultados/regras_arvore_MG.txt || true
-          echo ""
-
-      - name: Imprimir importância features GO
-        run: |
-          echo "========== importancia_features_GO.txt =========="
-          cat resultados/importancia_features_GO.txt || true
-          echo ""
-
-      - name: Imprimir importância features MG
-        run: |
-          echo "========== importancia_features_MG.txt =========="
-          cat resultados/importancia_features_MG.txt || true
-          echo ""
-
-      - name: Imprimir Logit binário GO
-        run: |
-          echo "========== logit_binario_GO.txt =========="
-          cat resultados/logit_binario_GO.txt || true
-          echo ""
-
-      - name: Imprimir Logit binário MG
-        run: |
-          echo "========== logit_binario_MG.txt =========="
-          cat resultados/logit_binario_MG.txt || true
-          echo ""
-
-      - name: Imprimir Linear GO
-        run: |
-          echo "========== linear_fractional_GO.txt =========="
-          cat resultados/linear_fractional_GO.txt || true
-          echo ""
-
-      - name: Imprimir Linear MG
-        run: |
-          echo "========== linear_fractional_MG.txt =========="
-          cat resultados/linear_fractional_MG.txt || true
           echo ""
