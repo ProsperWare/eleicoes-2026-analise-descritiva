@@ -16,17 +16,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: 'requirements.txt'
-
-      - name: Instalar dependências
+      - name: Criar e ativar venv no workspace
         run: |
+          if [ ! -d .venv ]; then
+            python3 -m venv .venv
+          fi
+          source .venv/bin/activate
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
 
       - name: Download BUs (GO e MG)
         run: |
