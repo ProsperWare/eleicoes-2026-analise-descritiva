@@ -93,20 +93,14 @@ jobs:
           cat resultados/resumo_modelos.txt || true
           echo ""
 
-      - name: Imprimir efeito comparecimento GO
+      - name: Imprimir clusters GO
         run: |
-          echo "========== efeito_comparecimento_GO.txt =========="
-          cat resultados/efeito_comparecimento_GO.txt || true
+          echo "========== clusters_GO.txt =========="
+          cat resultados/clusters_GO.txt || true
           echo ""
 
-      - name: Imprimir efeito comparecimento MG
+      - name: Imprimir clusters MG
         run: |
-          echo "========== efeito_comparecimento_MG.txt =========="
-          cat resultados/efeito_comparecimento_MG.txt || true
-          echo ""
-
-      - name: Imprimir resíduos árvore GO
-        run: |
-          echo "========== residuos_arvore_GO.txt =========="
-          cat resultados/residuos_arvore_GO.txt || true
+          echo "========== clusters_MG.txt =========="
+          cat resultados/clusters_MG.txt || true
           echo ""
