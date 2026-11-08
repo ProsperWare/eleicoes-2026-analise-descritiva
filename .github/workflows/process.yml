@@ -56,3 +56,15 @@ jobs:
           echo "========== regras_arvore_MG.txt =========="
           cat resultados/regras_arvore_MG.txt || true
           echo ""
+
+      - name: Imprimir importância features GO
+        run: |
+          echo "========== importancia_features_GO.txt =========="
+          cat resultados/importancia_features_GO.txt || true
+          echo ""
+
+      - name: Imprimir importância features MG
+        run: |
+          echo "========== importancia_features_MG.txt =========="
+          cat resultados/importancia_features_MG.txt || true
+          echo ""
