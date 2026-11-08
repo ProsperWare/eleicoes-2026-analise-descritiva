@@ -7,7 +7,7 @@ on:
       - 'scripts/**'
       - '.github/workflows/process.yml'
       - 'requirements.txt'
-  workflow_dispatch:  # permite disparo manual
+  workflow_dispatch:
 
 jobs:
   process:
@@ -20,16 +20,12 @@ jobs:
         run: |
           DEST="/home/alexa/eleicoes-2026-analise-descritiva"
           if [ ! -d "$DEST/.git" ]; then
-            echo "Clonando repositório em $DEST ..."
             git clone https://github.com/ProsperWare/eleicoes-2026-analise-descritiva.git "$DEST"
           else
-            echo "Atualizando repositório em $DEST ..."
             cd "$DEST"
             git fetch origin
             git reset --hard origin/main
           fi
-          echo "Repo sincronizado. Conteúdo de scripts/:"
-          ls -la "$DEST/scripts/" || true
 
       - name: Dry-run cleanup top 5
         run: |
@@ -38,24 +34,9 @@ jobs:
             chmod +x "$SCRIPT"
             "$SCRIPT"
           else
-            echo "Script não encontrado em $SCRIPT"
+            echo "Script não encontrado"
             exit 1
           fi
-
-      - name: Auditar espaço em disco e pasta home
-        run: |
-          echo "===== DISCO ====="
-          df -h
-          echo ""
-          echo "===== TOP PASTAS NO HOME ====="
-          du -sh ~/* 2>/dev/null | sort -hr | head -40
-          echo ""
-          echo "===== ARQUIVOS GRANDES NO HOME (>100MB) ====="
-          find ~ -type f -size +100M -exec ls -lh {} \; 2>/dev/null | sort -k5 -hr | head -30
-          echo ""
-          echo "===== CACHE E TEMPORARIOS ====="
-          du -sh ~/.cache ~/.local/share ~/.npm ~/.cargo 2>/dev/null || true
-          echo ""
 
       - name: Criar e ativar venv no workspace
         run: |
@@ -68,39 +49,26 @@ jobs:
           echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
 
       - name: Download BUs (todas as UFs)
-        run: |
-          python scripts/download_bu.py --all
-        continue-on-error: true  # não falha o job se já tiver baixado ou houver problema de rede
+        run: python scripts/download_bu.py --all
+        continue-on-error: true
 
       - name: Processar e gerar resultados
-        run: |
-          python scripts/process_and_summarize.py
+        run: python scripts/process_and_summarize.py
 
-      - name: Listar resultados
+      - name: Imprimir resumo preditivo sequencial
         run: |
-          echo "Conteúdo de resultados/:"
-          ls -la resultados/ || true
-
-      - name: Imprimir cobertura baseline
-        run: |
-          echo "========== cobertura_baseline.txt =========="
-          cat resultados/cobertura_baseline.txt || true
+          echo "========== resumo_preditivo_sequencial.txt =========="
+          cat resultados/resumo_preditivo_sequencial.txt || true
           echo ""
 
-      - name: Imprimir resumo consolidado
+      - name: Imprimir preditivo sequencial GO
         run: |
-          echo "========== resumo_modelos.txt =========="
-          cat resultados/resumo_modelos.txt || true
+          echo "========== preditivo_sequencial_GO.txt =========="
+          cat resultados/preditivo_sequencial_GO.txt || true
           echo ""
 
-      - name: Imprimir clusters GO
+      - name: Imprimir preditivo sequencial MG
         run: |
-          echo "========== clusters_GO.txt =========="
-          cat resultados/clusters_GO.txt || true
-          echo ""
-
-      - name: Imprimir clusters MG
-        run: |
-          echo "========== clusters_MG.txt =========="
-          cat resultados/clusters_MG.txt || true
+          echo "========== preditivo_sequencial_MG.txt =========="
+          cat resultados/preditivo_sequencial_MG.txt || true
           echo ""
