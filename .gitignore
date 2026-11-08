@@ -1,0 +1,7 @@
+data/raw/
+*.zip
+*.sha512
+__pycache__/
+.venv/
+*.pyc
+.env
