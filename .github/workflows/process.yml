@@ -16,6 +16,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Sync repo to /home/alexa/eleicoes-2026-analise-descritiva
+        run: |
+          DEST="/home/alexa/eleicoes-2026-analise-descritiva"
+          if [ ! -d "$DEST/.git" ]; then
+            echo "Clonando repositório em $DEST ..."
+            git clone https://github.com/ProsperWare/eleicoes-2026-analise-descritiva.git "$DEST"
+          else
+            echo "Atualizando repositório em $DEST ..."
+            cd "$DEST"
+            git fetch origin
+            git reset --hard origin/main
+          fi
+          echo "Repo sincronizado. Conteúdo de scripts/:"
+          ls -la "$DEST/scripts/" || true
+
+      - name: Dry-run cleanup top 5
+        run: |
+          SCRIPT="/home/alexa/eleicoes-2026-analise-descritiva/scripts/cleanup-top5.sh"
+          if [ -f "$SCRIPT" ]; then
+            chmod +x "$SCRIPT"
+            "$SCRIPT"
+          else
+            echo "Script não encontrado em $SCRIPT"
+            exit 1
+          fi
+
       - name: Auditar espaço em disco e pasta home
         run: |
           echo "===== DISCO ====="
