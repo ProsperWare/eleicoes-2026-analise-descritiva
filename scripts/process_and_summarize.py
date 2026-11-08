@@ -4,8 +4,8 @@ Processa Boletins de Urna baixados (zips em data/raw/),
 agrega por seção, extrai percentuais de candidatos principais,
 junt a T1 x T2, calcula baseline de transferência proporcional
 e mede cobertura (seções dentro da tolerância).
-Inclui matching melhorado de candidatos, árvore de decisão rasa
-e importância de features.
+Inclui matching melhorado de candidatos, árvore de decisão rasa,
+importância de features, Logit binário e modelo linear.
 Grava apenas saídas processadas em resultados/.
 """
 
@@ -15,6 +15,9 @@ import pandas as pd
 from sklearn.tree import DecisionTreeRegressor, export_text
 from sklearn.model_selection import train_test_split
 from sklearn.inspection import permutation_importance
+from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.metrics import accuracy_score, roc_auc_score, mean_absolute_error
+from sklearn.preprocessing import StandardScaler
 import numpy as np
 
 RAW = Path("data/raw")
@@ -22,8 +25,9 @@ RESULTS = Path("resultados")
 RESULTS.mkdir(exist_ok=True)
 
 SECTION_KEYS = ["SG_UF", "CD_MUNICIPIO", "NR_ZONA", "NR_SECAO"]
-TOLERANCE_PP = 5.0  # tolerância em pontos percentuais para cobertura
+TOLERANCE_PP = 5.0
 MAX_DEPTH = 4
+BINARY_THRESHOLD = 50.0  # % para classificação binária
 
 def load_bu_zip(zip_path: Path) -> pd.DataFrame:
     with zipfile.ZipFile(zip_path) as z:
@@ -95,7 +99,6 @@ def aggregate_section(df: pd.DataFrame, label: str) -> pd.DataFrame:
     return agg
 
 def find_best_candidate_match(merged: pd.DataFrame) -> tuple:
-    """Encontra o par de colunas PCT mais correlacionadas entre T1 e T2."""
     pct_t1 = [c for c in merged.columns if c.startswith("PCT_") and c.endswith("_t1")]
     pct_t2 = [c for c in merged.columns if c.startswith("PCT_") and c.endswith("_t2")]
 
@@ -137,14 +140,15 @@ def compute_coverage(merged: pd.DataFrame, col_t1: str, col_t2: str, tol: float 
         "erro_mediano_pp": round(float(work["erro_pp"].median()), 2),
     }
 
-def fit_simple_tree(merged: pd.DataFrame, col_t1: str, col_t2: str, max_depth: int = MAX_DEPTH) -> dict:
-    """Ajusta árvore rasa usando features do T1 para prever percentual do T2.
-    Inclui importância de features (Gini e permutação)."""
+def get_features(merged: pd.DataFrame) -> list:
     features = [c for c in merged.columns if c.startswith("PCT_") and c.endswith("_t1")]
     for extra in ["QT_COMPARECIMENTO_t1", "QT_APTOS_t1", "diff_comparecimento", "razao_comparecimento"]:
         if extra in merged.columns:
             features.append(extra)
+    return features
 
+def fit_simple_tree(merged: pd.DataFrame, col_t1: str, col_t2: str, max_depth: int = MAX_DEPTH) -> dict:
+    features = get_features(merged)
     work = merged[features + [col_t2]].dropna()
     if len(work) < 50:
         return {"erro": "Dados insuficientes para árvore"}
@@ -164,13 +168,11 @@ def fit_simple_tree(merged: pd.DataFrame, col_t1: str, col_t2: str, max_depth: i
 
     rules = export_text(tree, feature_names=list(features))
 
-    # Importância Gini (feature_importances_)
     gini_imp = dict(zip(features, tree.feature_importances_))
     gini_sorted = sorted(gini_imp.items(), key=lambda x: x[1], reverse=True)
 
-    # Importância por permutação (mais confiável)
     try:
-        perm = permutation_importance(tree, X_test, y_test, n_repeats=10, random_state=42, n_jobs=1)
+        perm = permutation_importance(tree, X_test, y_test, n_repeats=5, random_state=42, n_jobs=1)
         perm_imp = dict(zip(features, perm.importances_mean))
         perm_sorted = sorted(perm_imp.items(), key=lambda x: x[1], reverse=True)
     except Exception:
@@ -185,6 +187,87 @@ def fit_simple_tree(merged: pd.DataFrame, col_t1: str, col_t2: str, max_depth: i
         "regras": rules[:3000],
         "importancia_gini": gini_sorted,
         "importancia_permutacao": perm_sorted,
+    }
+
+def fit_logit_binary(merged: pd.DataFrame, col_t2: str, threshold: float = BINARY_THRESHOLD) -> dict:
+    features = get_features(merged)
+    work = merged[features + [col_t2]].dropna()
+    if len(work) < 50:
+        return {"erro": "Dados insuficientes"}
+
+    X = work[features]
+    y_cont = work[col_t2]
+    y_bin = (y_cont >= threshold).astype(int)
+
+    X_train, X_test, y_train, y_test, y_cont_train, y_cont_test = train_test_split(
+        X, y_bin, y_cont, test_size=0.3, random_state=42
+    )
+
+    scaler = StandardScaler()
+    X_train_s = scaler.fit_transform(X_train)
+    X_test_s = scaler.transform(X_test)
+
+    logit = LogisticRegression(max_iter=1000, random_state=42)
+    logit.fit(X_train_s, y_train)
+
+    proba = logit.predict_proba(X_test_s)[:, 1]
+    pred_bin = (proba >= 0.5).astype(int)
+
+    acc = accuracy_score(y_test, pred_bin)
+    try:
+        auc = roc_auc_score(y_test, proba)
+    except Exception:
+        auc = None
+
+    # Coeficientes
+    coefs = dict(zip(features, logit.coef_[0]))
+    coefs_sorted = sorted(coefs.items(), key=lambda x: abs(x[1]), reverse=True)
+
+    return {
+        "threshold": threshold,
+        "acuracia_teste": round(acc * 100, 2),
+        "auc": round(auc, 3) if auc else None,
+        "n_teste": len(y_test),
+        "proporcao_positiva_teste": round(y_test.mean() * 100, 2),
+        "coeficientes": coefs_sorted[:10],
+    }
+
+def fit_linear_fractional(merged: pd.DataFrame, col_t2: str) -> dict:
+    """Proxy de fractional logit: regressão linear no percentual (escalado)."""
+    features = get_features(merged)
+    work = merged[features + [col_t2]].dropna()
+    if len(work) < 50:
+        return {"erro": "Dados insuficientes"}
+
+    X = work[features]
+    y = work[col_t2]
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+    scaler = StandardScaler()
+    X_train_s = scaler.fit_transform(X_train)
+    X_test_s = scaler.transform(X_test)
+
+    lin = LinearRegression()
+    lin.fit(X_train_s, y_train)
+
+    pred = lin.predict(X_test_s)
+    pred = np.clip(pred, 0, 100)
+    erro = np.abs(pred - y_test)
+    within = (erro <= TOLERANCE_PP).sum()
+    cobertura = 100 * within / len(y_test)
+    mae = mean_absolute_error(y_test, pred)
+
+    coefs = dict(zip(features, lin.coef_))
+    coefs_sorted = sorted(coefs.items(), key=lambda x: abs(x[1]), reverse=True)
+
+    return {
+        "cobertura_teste_pct": round(cobertura, 2),
+        "erro_medio_teste_pp": round(float(erro.mean()), 2),
+        "mae": round(mae, 2),
+        "n_teste": len(y_test),
+        "coeficientes": coefs_sorted[:10],
+        "intercepto": round(float(lin.intercept_), 2),
     }
 
 def main():
@@ -244,21 +327,27 @@ def main():
             merged["diff_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] - merged["QT_COMPARECIMENTO_t1"]
             merged["razao_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] / merged["QT_COMPARECIMENTO_t1"].replace(0, pd.NA)
 
-        # Matching melhorado
         col_t1, col_t2 = find_best_candidate_match(merged)
         if not col_t1:
             print(f"  Sem match de candidatos para {uf}")
             continue
 
-        # Cobertura do baseline proporcional
         cov = compute_coverage(merged, col_t1, col_t2, TOLERANCE_PP)
         cov["uf"] = uf
         cov["secoes_join"] = len(merged)
         coverage_reports.append(cov)
 
-        # Árvore de decisão rasa + importância
+        # Árvore
         tree_result = fit_simple_tree(merged, col_t1, col_t2, MAX_DEPTH)
         cov["arvore"] = {k: v for k, v in tree_result.items() if k not in ("regras", "importancia_gini", "importancia_permutacao")}
+
+        # Logit binário
+        logit_bin = fit_logit_binary(merged, col_t2, BINARY_THRESHOLD)
+        cov["logit_binario"] = {k: v for k, v in logit_bin.items() if k != "coeficientes"}
+
+        # Linear (proxy fractional)
+        linear = fit_linear_fractional(merged, col_t2)
+        cov["linear"] = {k: v for k, v in linear.items() if k != "coeficientes"}
 
         summary = {
             "uf": uf,
@@ -270,9 +359,6 @@ def main():
             summary["diff_comp_media"] = float(merged["diff_comparecimento"].mean())
             summary["diff_comp_mediana"] = float(merged["diff_comparecimento"].median())
 
-        pct_cols = [c for c in merged.columns if c.startswith("PCT_")]
-        summary["colunas_pct"] = pct_cols
-
         with open(RESULTS / f"join_{uf}_resumo.txt", "w", encoding="utf-8") as f:
             f.write(str(summary) + "\n")
 
@@ -280,26 +366,48 @@ def main():
         if sample_cols:
             merged[sample_cols].head(10).to_csv(RESULTS / f"amostra_secao_{uf}.csv", index=False, sep=";")
 
-        # Salva regras da árvore
         if "regras" in tree_result:
             with open(RESULTS / f"regras_arvore_{uf}.txt", "w", encoding="utf-8") as f:
                 f.write(f"Árvore rasa (max_depth={MAX_DEPTH}) para {uf}\n")
                 f.write("="*50 + "\n")
                 f.write(tree_result["regras"] + "\n")
 
-        # Salva importância de features
         if "importancia_gini" in tree_result:
             with open(RESULTS / f"importancia_features_{uf}.txt", "w", encoding="utf-8") as f:
                 f.write(f"Importância de features — árvore depth={MAX_DEPTH} — {uf}\n")
                 f.write("="*60 + "\n\n")
-                f.write("Importância Gini (feature_importances_):\n")
+                f.write("Importância Gini:\n")
                 for feat, imp in tree_result["importancia_gini"]:
                     f.write(f"  {feat}: {imp:.4f}\n")
-                f.write("\nImportância por permutação (mean decrease in score):\n")
+                f.write("\nImportância por permutação:\n")
                 for feat, imp in tree_result.get("importancia_permutacao", []):
                     f.write(f"  {feat}: {imp:.4f}\n")
 
-    # Resumo geral de cobertura
+        # Logit binário
+        if "coeficientes" in logit_bin:
+            with open(RESULTS / f"logit_binario_{uf}.txt", "w", encoding="utf-8") as f:
+                f.write(f"Logit binário (≥{BINARY_THRESHOLD}% no T2) — {uf}\n")
+                f.write("="*50 + "\n")
+                f.write(f"Acurácia teste: {logit_bin.get('acuracia_teste')}%\n")
+                f.write(f"AUC: {logit_bin.get('auc')}\n")
+                f.write(f"Proporção positiva: {logit_bin.get('proporcao_positiva_teste')}%\n\n")
+                f.write("Coeficientes (top):\n")
+                for feat, coef in logit_bin["coeficientes"]:
+                    f.write(f"  {feat}: {coef:.4f}\n")
+
+        # Linear
+        if "coeficientes" in linear:
+            with open(RESULTS / f"linear_fractional_{uf}.txt", "w", encoding="utf-8") as f:
+                f.write(f"Modelo linear (proxy fractional) — {uf}\n")
+                f.write("="*50 + "\n")
+                f.write(f"Cobertura ±{TOLERANCE_PP} p.p.: {linear.get('cobertura_teste_pct')}%\n")
+                f.write(f"Erro médio: {linear.get('erro_medio_teste_pp')} p.p.\n")
+                f.write(f"MAE: {linear.get('mae')}\n")
+                f.write(f"Intercepto: {linear.get('intercepto')}\n\n")
+                f.write("Coeficientes (top):\n")
+                for feat, coef in linear["coeficientes"]:
+                    f.write(f"  {feat}: {coef:.4f}\n")
+
     if coverage_reports:
         with open(RESULTS / "cobertura_baseline.txt", "w", encoding="utf-8") as f:
             f.write(f"Cobertura do baseline de transferência proporcional (tolerância ±{TOLERANCE_PP} p.p.)\n")
