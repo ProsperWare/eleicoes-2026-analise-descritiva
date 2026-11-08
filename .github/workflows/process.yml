@@ -55,20 +55,20 @@ jobs:
       - name: Processar e gerar resultados
         run: python scripts/process_and_summarize.py
 
-      - name: Imprimir resumo preditivo sequencial
+      - name: Imprimir resumo mult3
         run: |
-          echo "========== resumo_preditivo_sequencial.txt =========="
-          cat resultados/resumo_preditivo_sequencial.txt || true
+          echo "========== resumo_mult3.txt =========="
+          cat resultados/resumo_mult3.txt || true
           echo ""
 
-      - name: Imprimir preditivo sequencial GO
+      - name: Imprimir regras mult3 GO
         run: |
-          echo "========== preditivo_sequencial_GO.txt =========="
-          cat resultados/preditivo_sequencial_GO.txt || true
+          echo "========== regras_mult3_GO.txt =========="
+          cat resultados/regras_mult3_GO.txt || true
           echo ""
 
-      - name: Imprimir preditivo sequencial MG
+      - name: Imprimir regras mult3 MG
         run: |
-          echo "========== preditivo_sequencial_MG.txt =========="
-          cat resultados/preditivo_sequencial_MG.txt || true
+          echo "========== regras_mult3_MG.txt =========="
+          cat resultados/regras_mult3_MG.txt || true
           echo ""
