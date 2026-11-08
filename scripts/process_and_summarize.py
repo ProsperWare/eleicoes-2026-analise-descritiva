@@ -4,12 +4,16 @@ Processa Boletins de Urna baixados (zips em data/raw/),
 agrega por seção, extrai percentuais de candidatos principais,
 junt a T1 x T2, calcula baseline de transferência proporcional
 e mede cobertura (seções dentro da tolerância).
+Inclui matching melhorado de candidatos e árvore de decisão rasa.
 Grava apenas saídas processadas em resultados/.
 """
 
 import zipfile
 from pathlib import Path
 import pandas as pd
+from sklearn.tree import DecisionTreeRegressor, export_text
+from sklearn.model_selection import train_test_split
+import numpy as np
 
 RAW = Path("data/raw")
 RESULTS = Path("resultados")
@@ -17,6 +21,7 @@ RESULTS.mkdir(exist_ok=True)
 
 SECTION_KEYS = ["SG_UF", "CD_MUNICIPIO", "NR_ZONA", "NR_SECAO"]
 TOLERANCE_PP = 5.0  # tolerância em pontos percentuais para cobertura
+MAX_DEPTH = 3
 
 def load_bu_zip(zip_path: Path) -> pd.DataFrame:
     with zipfile.ZipFile(zip_path) as z:
@@ -57,7 +62,7 @@ def extract_candidate_pcts(df: pd.DataFrame, keys: list, cargo_code: str = None,
     result = totals.copy()
     for nr in top_cands:
         name = cand_totals.loc[cand_totals["NR_VOTAVEL"] == nr, "NM_VOTAVEL"].iloc[0]
-        safe_name = "".join(c if c.isalnum() else "_" for c in str(name)[:30])
+        safe_name = "".join(c if c.isalnum() else "_" for c in str(name)[:40])
         col = f"PCT_{safe_name}"
         cand_votes = work[work["NR_VOTAVEL"] == nr].groupby(keys)["QT_VOTOS"].sum().reset_index()
         cand_votes = cand_votes.merge(totals, on=keys, how="left")
@@ -87,22 +92,37 @@ def aggregate_section(df: pd.DataFrame, label: str) -> pd.DataFrame:
     agg["origem"] = label
     return agg
 
-def compute_coverage(merged: pd.DataFrame, tol: float = TOLERANCE_PP) -> dict:
-    """Calcula cobertura do baseline: percentual do candidato líder do T1 prevendo o T2."""
+def find_best_candidate_match(merged: pd.DataFrame) -> tuple:
+    """Encontra o par de colunas PCT mais correlacionadas entre T1 e T2."""
     pct_t1 = [c for c in merged.columns if c.startswith("PCT_") and c.endswith("_t1")]
     pct_t2 = [c for c in merged.columns if c.startswith("PCT_") and c.endswith("_t2")]
 
     if not pct_t1 or not pct_t2:
-        return {"cobertura": None, "nota": "Sem colunas PCT suficientes"}
+        return None, None
 
-    # Usa o primeiro percentual de cada turno como proxy do candidato principal
-    col_t1 = pct_t1[0]
-    col_t2 = pct_t2[0]
+    best_corr = -1
+    best_pair = (pct_t1[0], pct_t2[0])
 
-    merged = merged.copy()
-    merged["erro_pp"] = (merged[col_t2] - merged[col_t1]).abs()
-    within = (merged["erro_pp"] <= tol).sum()
-    total = len(merged.dropna(subset=["erro_pp"]))
+    for c1 in pct_t1:
+        for c2 in pct_t2:
+            valid = merged[[c1, c2]].dropna()
+            if len(valid) < 10:
+                continue
+            corr = valid[c1].corr(valid[c2])
+            if pd.notna(corr) and corr > best_corr:
+                best_corr = corr
+                best_pair = (c1, c2)
+
+    return best_pair
+
+def compute_coverage(merged: pd.DataFrame, col_t1: str, col_t2: str, tol: float = TOLERANCE_PP) -> dict:
+    if col_t1 not in merged.columns or col_t2 not in merged.columns:
+        return {"cobertura": None, "nota": "Colunas não encontradas"}
+
+    work = merged[[col_t1, col_t2]].dropna().copy()
+    work["erro_pp"] = (work[col_t2] - work[col_t1]).abs()
+    within = (work["erro_pp"] <= tol).sum()
+    total = len(work)
 
     return {
         "candidato_t1": col_t1,
@@ -111,8 +131,41 @@ def compute_coverage(merged: pd.DataFrame, tol: float = TOLERANCE_PP) -> dict:
         "secoes_avaliadas": int(total),
         "secoes_dentro": int(within),
         "cobertura_pct": round(100 * within / total, 2) if total > 0 else 0,
-        "erro_medio_pp": round(float(merged["erro_pp"].mean()), 2),
-        "erro_mediano_pp": round(float(merged["erro_pp"].median()), 2),
+        "erro_medio_pp": round(float(work["erro_pp"].mean()), 2),
+        "erro_mediano_pp": round(float(work["erro_pp"].median()), 2),
+    }
+
+def fit_simple_tree(merged: pd.DataFrame, col_t1: str, col_t2: str, max_depth: int = MAX_DEPTH) -> dict:
+    """Ajusta árvore rasa usando features do T1 para prever percentual do T2."""
+    features = [c for c in merged.columns if c.startswith("PCT_") and c.endswith("_t1")]
+    if "QT_COMPARECIMENTO_t1" in merged.columns:
+        features.append("QT_COMPARECIMENTO_t1")
+
+    work = merged[features + [col_t2]].dropna()
+    if len(work) < 50:
+        return {"erro": "Dados insuficientes para árvore"}
+
+    X = work[features]
+    y = work[col_t2]
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+    tree = DecisionTreeRegressor(max_depth=max_depth, random_state=42, min_samples_leaf=20)
+    tree.fit(X_train, y_train)
+
+    pred = tree.predict(X_test)
+    erro = np.abs(pred - y_test)
+    within = (erro <= TOLERANCE_PP).sum()
+    cobertura = 100 * within / len(y_test)
+
+    rules = export_text(tree, feature_names=list(features))
+
+    return {
+        "max_depth": max_depth,
+        "cobertura_teste_pct": round(cobertura, 2),
+        "erro_medio_teste_pp": round(float(erro.mean()), 2),
+        "n_teste": len(y_test),
+        "regras": rules[:2000],  # limita tamanho
     }
 
 def main():
@@ -172,11 +225,21 @@ def main():
             merged["diff_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] - merged["QT_COMPARECIMENTO_t1"]
             merged["razao_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] / merged["QT_COMPARECIMENTO_t1"].replace(0, pd.NA)
 
+        # Matching melhorado
+        col_t1, col_t2 = find_best_candidate_match(merged)
+        if not col_t1:
+            print(f"  Sem match de candidatos para {uf}")
+            continue
+
         # Cobertura do baseline proporcional
-        cov = compute_coverage(merged, TOLERANCE_PP)
+        cov = compute_coverage(merged, col_t1, col_t2, TOLERANCE_PP)
         cov["uf"] = uf
         cov["secoes_join"] = len(merged)
         coverage_reports.append(cov)
+
+        # Árvore de decisão rasa
+        tree_result = fit_simple_tree(merged, col_t1, col_t2, MAX_DEPTH)
+        cov["arvore"] = tree_result
 
         summary = {
             "uf": uf,
@@ -194,15 +257,23 @@ def main():
         with open(RESULTS / f"join_{uf}_resumo.txt", "w", encoding="utf-8") as f:
             f.write(str(summary) + "\n")
 
-        sample_cols = keys + [c for c in merged.columns if "PCT_" in c or "COMPARECIMENTO" in c or "diff_" in c or "erro_" in c]
+        sample_cols = keys + [c for c in merged.columns if "PCT_" in c or "COMPARECIMENTO" in c or "diff_" in c]
         if sample_cols:
             merged[sample_cols].head(10).to_csv(RESULTS / f"amostra_secao_{uf}.csv", index=False, sep=";")
+
+        # Salva regras da árvore
+        if "regras" in tree_result:
+            with open(RESULTS / f"regras_arvore_{uf}.txt", "w", encoding="utf-8") as f:
+                f.write(f"Árvore rasa (max_depth={MAX_DEPTH}) para {uf}\n")
+                f.write("="*50 + "\n")
+                f.write(tree_result["regras"] + "\n")
 
     # Resumo geral de cobertura
     if coverage_reports:
         with open(RESULTS / "cobertura_baseline.txt", "w", encoding="utf-8") as f:
             f.write(f"Cobertura do baseline de transferência proporcional (tolerância ±{TOLERANCE_PP} p.p.)\n")
-            f.write("=" * 60 + "\n\n")
+            f.write("Matching por maior correlação entre candidatos T1 e T2\n")
+            f.write("=" * 70 + "\n\n")
             for c in coverage_reports:
                 f.write(str(c) + "\n\n")
 
