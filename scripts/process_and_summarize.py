@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Processa Boletins de Urna baixados (zips em data/raw/),
-resume por seção e grava saídas úteis em resultados/.
-Não grava arquivos crus em resultados/.
+agrega por seção, junta T1 x T2 e calcula baseline simples.
+Grava apenas saídas processadas em resultados/.
 """
 
 import zipfile
@@ -13,112 +13,135 @@ RAW = Path("data/raw")
 RESULTS = Path("resultados")
 RESULTS.mkdir(exist_ok=True)
 
+SECTION_KEYS = ["SG_UF", "CD_MUNICIPIO", "NR_ZONA", "NR_SECAO"]
+
 def load_bu_zip(zip_path: Path) -> pd.DataFrame:
-    """Carrega o CSV principal de dentro do zip do BU."""
     with zipfile.ZipFile(zip_path) as z:
-        # Pega o primeiro arquivo .csv ou .txt grande
-        csv_names = [n for n in z.namelist() if n.lower().endswith(('.csv', '.txt'))]
+        csv_names = [n for n in z.namelist() if n.lower().endswith((".csv", ".txt"))]
         if not csv_names:
-            raise ValueError(f"Nenhum CSV encontrado em {zip_path.name}")
-        # Usa o maior (geralmente o principal)
+            raise ValueError(f"Nenhum CSV em {zip_path.name}")
         csv_name = max(csv_names, key=lambda n: z.getinfo(n).file_size)
         with z.open(csv_name) as f:
-            # TSE costuma usar ; e encoding latin-1 ou utf-8
-            for enc in ('utf-8', 'latin-1', 'cp1252'):
+            for enc in ("utf-8", "latin-1", "cp1252"):
                 try:
                     f.seek(0)
-                    df = pd.read_csv(f, sep=';', encoding=enc, low_memory=False, dtype=str)
-                    return df
+                    return pd.read_csv(f, sep=";", encoding=enc, low_memory=False, dtype=str)
                 except Exception:
                     continue
-            raise ValueError(f"Não foi possível ler {csv_name} em {zip_path.name}")
+            raise ValueError(f"Falha ao ler {csv_name}")
 
-def summarize_df(df: pd.DataFrame, label: str) -> dict:
-    """Resumo básico de um BU."""
-    summary = {
-        "label": label,
-        "linhas": len(df),
-        "colunas": list(df.columns[:20]),  # primeiras colunas para inspeção
-        "n_colunas": len(df.columns),
-    }
-    # Tenta identificar colunas típicas
-    for col in ['SG_UF', 'NR_ZONA', 'NR_SECAO', 'QT_COMPARECIMENTO', 'QT_APTOS']:
+def to_numeric_safe(s):
+    return pd.to_numeric(s, errors="coerce").fillna(0)
+
+def aggregate_section(df: pd.DataFrame, label: str) -> pd.DataFrame:
+    """Agrega o formato longo do BU para uma linha por seção."""
+    keys = [c for c in SECTION_KEYS if c in df.columns]
+    if not keys:
+        raise ValueError(f"Chaves de seção não encontradas em {label}")
+
+    # Colunas de quantidade comuns
+    vote_col = None
+    for c in ["QT_VOTOS", "QT_VOTOS_NOMINAIS", "QT_VOTOS_BRANCOS", "QT_VOTOS_NULOS"]:
+        if c in df.columns:
+            vote_col = c
+            break
+
+    agg = df.groupby(keys, as_index=False).agg(
+        linhas=("NR_SECAO", "size") if "NR_SECAO" in df.columns else (keys[0], "size")
+    )
+
+    # Comparecimento / aptos (se existirem, são constantes por seção)
+    for col in ["QT_COMPARECIMENTO", "QT_APTOS", "QT_ABSTENCOES"]:
         if col in df.columns:
-            summary[f"tem_{col}"] = True
-            if col in ['QT_COMPARECIMENTO', 'QT_APTOS']:
-                try:
-                    summary[f"soma_{col}"] = pd.to_numeric(df[col], errors='coerce').sum()
-                except Exception:
-                    pass
-    return summary
+            tmp = df.groupby(keys)[col].first().reset_index()
+            tmp[col] = to_numeric_safe(tmp[col])
+            agg = agg.merge(tmp, on=keys, how="left")
+
+    # Total de votos nominais se houver coluna de votos
+    if vote_col and vote_col in df.columns:
+        votes = df.copy()
+        votes[vote_col] = to_numeric_safe(votes[vote_col])
+        total = votes.groupby(keys)[vote_col].sum().reset_index().rename(columns={vote_col: "QT_VOTOS_TOTAL"})
+        agg = agg.merge(total, on=keys, how="left")
+
+    agg["origem"] = label
+    return agg
 
 def main():
     zips = sorted(RAW.glob("bweb_*.zip"))
     if not zips:
-        print("Nenhum zip encontrado em data/raw/. Rode o download primeiro.")
+        print("Nenhum zip em data/raw/")
         return
 
+    section_dfs = {}
     reports = []
-    dfs = {}
 
     for zp in zips:
         print(f"Processando {zp.name}...")
         try:
-            df = load_bu_zip(zp)
+            raw = load_bu_zip(zp)
             label = zp.stem
-            dfs[label] = df
-            summary = summarize_df(df, label)
-            reports.append(summary)
-            print(f"  -> {len(df)} linhas, {len(df.columns)} colunas")
+            sec = aggregate_section(raw, label)
+            section_dfs[label] = sec
+            reports.append({
+                "arquivo": label,
+                "linhas_brutas": len(raw),
+                "secoes": len(sec),
+                "colunas_secao": list(sec.columns),
+            })
+            print(f"  -> {len(raw)} linhas brutas → {len(sec)} seções")
         except Exception as e:
-            print(f"  ERRO em {zp.name}: {e}")
-            reports.append({"label": zp.name, "erro": str(e)})
+            print(f"  ERRO: {e}")
+            reports.append({"arquivo": zp.name, "erro": str(e)})
 
-    # Grava resumo geral
-    out_txt = RESULTS / "resumo_bus.txt"
-    with open(out_txt, "w", encoding="utf-8") as f:
-        f.write("Resumo dos Boletins de Urna processados\n")
-        f.write("=" * 50 + "\n\n")
+    # Resumo
+    with open(RESULTS / "resumo_secoes.txt", "w", encoding="utf-8") as f:
+        f.write("Agregação por seção\n" + "="*40 + "\n\n")
         for r in reports:
             f.write(str(r) + "\n\n")
 
-    # Se houver T1 e T2 da mesma UF, tenta juntar por seção
-    # (exemplo simples para AC)
-    t1_keys = [k for k in dfs if "1t" in k]
-    t2_keys = [k for k in dfs if "2t" in k]
+    # Join T1 x T2
+    t1_keys = [k for k in section_dfs if "1t" in k]
+    t2_keys = [k for k in section_dfs if "2t" in k]
 
-    join_info = []
     for t1k in t1_keys:
         uf = t1k.split("_")[2] if "_" in t1k else "?"
         t2k = next((k for k in t2_keys if uf in k), None)
-        if t2k and t1k in dfs and t2k in dfs:
-            df1 = dfs[t1k]
-            df2 = dfs[t2k]
-            # Tenta chaves comuns de seção
-            keys = [c for c in ['SG_UF', 'CD_MUNICIPIO', 'NR_ZONA', 'NR_SECAO'] if c in df1.columns and c in df2.columns]
-            if keys:
-                merged = df1.merge(df2, on=keys, how='inner', suffixes=('_t1', '_t2'))
-                join_info.append({
-                    "uf": uf,
-                    "secoes_t1": len(df1),
-                    "secoes_t2": len(df2),
-                    "secoes_join": len(merged),
-                    "chaves": keys
-                })
-                # Salva uma amostra pequena (não o arquivo cru)
-                sample = merged.head(5)
-                sample.to_csv(RESULTS / f"amostra_join_{uf}.csv", index=False, sep=';')
-                print(f"Join {uf}: {len(merged)} seções comuns")
+        if not t2k:
+            continue
 
-    if join_info:
-        with open(RESULTS / "joins_resumo.txt", "w", encoding="utf-8") as f:
-            f.write("Resumo de junções T1 x T2 por seção\n")
-            f.write("=" * 40 + "\n")
-            for j in join_info:
-                f.write(str(j) + "\n")
+        df1 = section_dfs[t1k]
+        df2 = section_dfs[t2k]
+        keys = [c for c in SECTION_KEYS if c in df1.columns and c in df2.columns]
 
-    print(f"\nResultados gravados em {RESULTS.resolve()}")
-    print("Arquivos crus permanecem apenas em data/raw/")
+        if not keys:
+            continue
+
+        merged = df1.merge(df2, on=keys, how="inner", suffixes=("_t1", "_t2"))
+        print(f"Join {uf}: {len(merged)} seções")
+
+        # Baseline simples: proporção de comparecimento
+        if "QT_COMPARECIMENTO_t1" in merged.columns and "QT_COMPARECIMENTO_t2" in merged.columns:
+            merged["diff_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] - merged["QT_COMPARECIMENTO_t1"]
+            merged["razao_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] / merged["QT_COMPARECIMENTO_t1"].replace(0, pd.NA)
+
+        # Salva resumo do join (não o dataset completo)
+        summary = {
+            "uf": uf,
+            "secoes_join": len(merged),
+            "chaves": keys,
+        }
+        if "diff_comparecimento" in merged.columns:
+            summary["diff_comp_media"] = float(merged["diff_comparecimento"].mean())
+            summary["diff_comp_mediana"] = float(merged["diff_comparecimento"].median())
+
+        with open(RESULTS / f"join_{uf}_resumo.txt", "w", encoding="utf-8") as f:
+            f.write(str(summary) + "\n")
+
+        # Amostra pequena
+        merged.head(10).to_csv(RESULTS / f"amostra_secao_{uf}.csv", index=False, sep=";")
+
+    print(f"\nResultados em {RESULTS.resolve()}")
 
 if __name__ == "__main__":
     main()
