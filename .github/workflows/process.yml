@@ -38,3 +38,21 @@ jobs:
         run: |
           echo "Conteúdo de resultados/:"
           ls -la resultados/ || true
+
+      - name: Imprimir cobertura baseline
+        run: |
+          echo "========== cobertura_baseline.txt =========="
+          cat resultados/cobertura_baseline.txt || true
+          echo ""
+
+      - name: Imprimir regras árvore GO
+        run: |
+          echo "========== regras_arvore_GO.txt =========="
+          cat resultados/regras_arvore_GO.txt || true
+          echo ""
+
+      - name: Imprimir regras árvore MG
+        run: |
+          echo "========== regras_arvore_MG.txt =========="
+          cat resultados/regras_arvore_MG.txt || true
+          echo ""
