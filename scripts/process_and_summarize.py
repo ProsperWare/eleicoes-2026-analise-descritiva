@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """
-Processa BUs, gera baseline, árvore, linear, logit, clusters e
-módulo preditivo sequencial (múltiplos de 3 → pares restantes → ímpares restantes).
+Treina modelos (árvore, linear, logit) apenas nas seções múltiplas de 3
+e avalia no restante. Gera resumo por UF.
 """
 
 import zipfile
 from pathlib import Path
 import pandas as pd
 from sklearn.tree import DecisionTreeRegressor, export_text
-from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression, LinearRegression
-from sklearn.metrics import accuracy_score, roc_auc_score, mean_absolute_error
+from sklearn.metrics import accuracy_score, mean_absolute_error
 from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
 import numpy as np
 
 RAW = Path("data/raw")
@@ -23,7 +21,6 @@ SECTION_KEYS = ["SG_UF", "CD_MUNICIPIO", "NR_ZONA", "NR_SECAO"]
 TOLERANCE_PP = 5.0
 MAX_DEPTH = 4
 BINARY_THRESHOLD = 50.0
-N_CLUSTERS = 4
 
 def load_bu_zip(zip_path: Path) -> pd.DataFrame:
     with zipfile.ZipFile(zip_path) as z:
@@ -108,41 +105,24 @@ def get_features(merged: pd.DataFrame) -> list:
             features.append(extra)
     return features
 
-def modulo_preditivo_sequencial(merged: pd.DataFrame, col_t2: str) -> dict:
+def split_mult3(merged: pd.DataFrame):
     if "NR_SECAO" not in merged.columns:
-        return {"erro": "NR_SECAO não encontrado"}
-    features = get_features(merged)
-    work = merged[features + [col_t2, "NR_SECAO"]].dropna().copy()
-    if len(work) < 100:
-        return {"erro": "Dados insuficientes"}
+        return None, None
+    work = merged.copy()
     work["NR_SECAO_num"] = to_numeric_safe(work["NR_SECAO"])
     train = work[work["NR_SECAO_num"] % 3 == 0]
-    remaining = work[work["NR_SECAO_num"] % 3 != 0]
-    test_even = remaining[remaining["NR_SECAO_num"] % 2 == 0]
-    test_odd = remaining[remaining["NR_SECAO_num"] % 2 != 0]
-    if len(train) < 30:
-        return {"erro": "Treino insuficiente"}
-    X_train = train[features]
-    y_train = train[col_t2]
-    tree = DecisionTreeRegressor(max_depth=MAX_DEPTH, random_state=42, min_samples_leaf=15)
-    tree.fit(X_train, y_train)
-    def evaluate(subset, name):
-        if len(subset) < 10:
-            return {"nome": name, "n": len(subset), "cobertura": None, "erro_medio": None}
-        X = subset[features]
-        y = subset[col_t2]
-        pred = tree.predict(X)
-        erro = np.abs(pred - y)
-        within = (erro <= TOLERANCE_PP).sum()
-        cob = 100 * within / len(subset)
-        return {"nome": name, "n": len(subset), "cobertura": round(cob, 2), "erro_medio": round(float(erro.mean()), 2)}
-    results = [
-        evaluate(train, "treino_multiplos_3"),
-        evaluate(test_even, "teste_pares_restantes"),
-        evaluate(test_odd, "teste_impares_restantes"),
-    ]
-    rules = export_text(tree, feature_names=list(features))[:2000]
-    return {"resultados": results, "regras": rules, "n_treino": len(train), "n_teste_pares": len(test_even), "n_teste_impares": len(test_odd)}
+    test = work[work["NR_SECAO_num"] % 3 != 0]
+    return train, test
+
+def evaluate_regression(model, X, y):
+    if len(X) == 0:
+        return None, None
+    pred = model.predict(X)
+    pred = np.clip(pred, 0, 100)
+    erro = np.abs(pred - y)
+    within = (erro <= TOLERANCE_PP).sum()
+    cob = 100 * within / len(y)
+    return round(cob, 2), round(float(erro.mean()), 2)
 
 def main():
     zips = sorted(RAW.glob("bweb_*.zip"))
@@ -162,7 +142,7 @@ def main():
             print(f"  ERRO: {e}")
     t1_keys = [k for k in section_dfs if "1t" in k]
     t2_keys = [k for k in section_dfs if "2t" in k]
-    model_summary = []
+    summary = []
     for t1k in t1_keys:
         uf = t1k.split("_")[2] if "_" in t1k else "?"
         t2k = next((k for k in t2_keys if uf in k), None)
@@ -181,37 +161,63 @@ def main():
         col_t1, col_t2 = find_best_candidate_match(merged)
         if not col_t1:
             continue
-        # Módulo preditivo sequencial
-        pred_seq = modulo_preditivo_sequencial(merged, col_t2)
-        if "resultados" in pred_seq:
-            with open(RESULTS / f"preditivo_sequencial_{uf}.txt", "w", encoding="utf-8") as f:
-                f.write(f"Módulo preditivo sequencial — {uf}\n")
-                f.write("="*50 + "\n")
-                f.write(f"Treino (múltiplos de 3): {pred_seq['n_treino']} seções\n")
-                f.write(f"Teste pares: {pred_seq['n_teste_pares']} | Ímpares: {pred_seq['n_teste_impares']}\n\n")
-                for r in pred_seq["resultados"]:
-                    f.write(f"{r['nome']}: cobertura {r['cobertura']}% | erro {r['erro_medio']} p.p. (n={r['n']})\n")
-                f.write("\nRegras da árvore (treinada nos múltiplos de 3):\n")
-                f.write(pred_seq["regras"] + "\n")
-            # Extrai cobertura dos testes para o resumo
-            cob_pares = next((r["cobertura"] for r in pred_seq["resultados"] if r["nome"] == "teste_pares_restantes"), None)
-            cob_impares = next((r["cobertura"] for r in pred_seq["resultados"] if r["nome"] == "teste_impares_restantes"), None)
-        else:
-            cob_pares = cob_impares = None
-        model_summary.append({
-            "uf": uf,
-            "secoes": len(merged),
-            "cob_pares": cob_pares,
-            "cob_impares": cob_impares,
-        })
-    if model_summary:
-        with open(RESULTS / "resumo_preditivo_sequencial.txt", "w", encoding="utf-8") as f:
-            f.write("Resumo módulo preditivo sequencial\n")
+        train, test = split_mult3(merged)
+        if train is None or len(train) < 30:
+            continue
+        features = get_features(merged)
+        X_train = train[features].dropna()
+        y_train = train.loc[X_train.index, col_t2]
+        X_test = test[features].dropna()
+        y_test = test.loc[X_test.index, col_t2]
+        # Árvore
+        tree = DecisionTreeRegressor(max_depth=MAX_DEPTH, random_state=42, min_samples_leaf=15)
+        tree.fit(X_train, y_train)
+        cob_tree_tr, err_tree_tr = evaluate_regression(tree, X_train, y_train)
+        cob_tree_te, err_tree_te = evaluate_regression(tree, X_test, y_test)
+        rules = export_text(tree, feature_names=list(features))[:2500]
+        # Linear
+        scaler = StandardScaler()
+        X_train_s = scaler.fit_transform(X_train)
+        X_test_s = scaler.transform(X_test)
+        lin = LinearRegression()
+        lin.fit(X_train_s, y_train)
+        cob_lin_tr, err_lin_tr = evaluate_regression(lin, X_train_s, y_train)
+        cob_lin_te, err_lin_te = evaluate_regression(lin, X_test_s, y_test)
+        # Logit binário
+        y_bin_train = (y_train >= BINARY_THRESHOLD).astype(int)
+        logit_acc = None
+        if y_bin_train.nunique() >= 2:
+            try:
+                logit = LogisticRegression(max_iter=1000, random_state=42)
+                logit.fit(X_train_s, y_bin_train)
+                y_bin_test = (y_test >= BINARY_THRESHOLD).astype(int)
+                pred_bin = logit.predict(X_test_s)
+                logit_acc = round(100 * accuracy_score(y_bin_test, pred_bin), 2)
+            except Exception:
+                logit_acc = None
+        # Salva regras
+        with open(RESULTS / f"regras_mult3_{uf}.txt", "w", encoding="utf-8") as f:
+            f.write(f"Árvore treinada nos múltiplos de 3 — {uf}\n")
             f.write("="*50 + "\n")
-            f.write(f"{'UF':<6} {'Seções':>8} {'Pares%':>10} {'Ímpares%':>12}\n")
-            f.write("-"*40 + "\n")
-            for m in model_summary:
-                f.write(f"{m['uf']:<6} {m['secoes']:>8} {str(m['cob_pares']):>10} {str(m['cob_impares']):>12}\n")
+            f.write(rules + "\n")
+        summary.append({
+            "uf": uf,
+            "n_treino": len(train),
+            "n_teste": len(test),
+            "arvore_treino": cob_tree_tr,
+            "arvore_teste": cob_tree_te,
+            "linear_treino": cob_lin_tr,
+            "linear_teste": cob_lin_te,
+            "logit_teste": logit_acc,
+        })
+    if summary:
+        with open(RESULTS / "resumo_mult3.txt", "w", encoding="utf-8") as f:
+            f.write("Resumo: modelos treinados apenas nos múltiplos de 3\n")
+            f.write("="*70 + "\n")
+            f.write(f"{'UF':<6} {'Treino':>8} {'Teste':>8} {'ArvTr%':>8} {'ArvTe%':>8} {'LinTr%':>8} {'LinTe%':>8} {'LogitTe%':>10}\n")
+            f.write("-"*70 + "\n")
+            for m in summary:
+                f.write(f"{m['uf']:<6} {m['n_treino']:>8} {m['n_teste']:>8} {str(m['arvore_treino']):>8} {str(m['arvore_teste']):>8} {str(m['linear_treino']):>8} {str(m['linear_teste']):>8} {str(m['logit_teste']):>10}\n")
     print(f"\nResultados em {RESULTS.resolve()}")
 
 if __name__ == "__main__":
