@@ -16,6 +16,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Auditar espaço em disco e pasta home
+        run: |
+          echo "===== DISCO ====="
+          df -h
+          echo ""
+          echo "===== TOP PASTAS NO HOME ====="
+          du -sh ~/* 2>/dev/null | sort -hr | head -40
+          echo ""
+          echo "===== ARQUIVOS GRANDES NO HOME (>100MB) ====="
+          find ~ -type f -size +100M -exec ls -lh {} \; 2>/dev/null | sort -k5 -hr | head -30
+          echo ""
+          echo "===== CACHE E TEMPORARIOS ====="
+          du -sh ~/.cache ~/.local/share ~/.npm ~/.cargo 2>/dev/null || true
+          echo ""
+
       - name: Criar e ativar venv no workspace
         run: |
           if [ ! -d .venv ]; then
