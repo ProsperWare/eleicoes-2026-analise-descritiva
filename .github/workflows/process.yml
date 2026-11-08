@@ -86,3 +86,27 @@ jobs:
           echo "========== cobertura_baseline.txt =========="
           cat resultados/cobertura_baseline.txt || true
           echo ""
+
+      - name: Imprimir resumo consolidado
+        run: |
+          echo "========== resumo_modelos.txt =========="
+          cat resultados/resumo_modelos.txt || true
+          echo ""
+
+      - name: Imprimir efeito comparecimento GO
+        run: |
+          echo "========== efeito_comparecimento_GO.txt =========="
+          cat resultados/efeito_comparecimento_GO.txt || true
+          echo ""
+
+      - name: Imprimir efeito comparecimento MG
+        run: |
+          echo "========== efeito_comparecimento_MG.txt =========="
+          cat resultados/efeito_comparecimento_MG.txt || true
+          echo ""
+
+      - name: Imprimir resíduos árvore GO
+        run: |
+          echo "========== residuos_arvore_GO.txt =========="
+          cat resultados/residuos_arvore_GO.txt || true
+          echo ""
