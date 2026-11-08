@@ -4,7 +4,8 @@ Processa Boletins de Urna baixados (zips em data/raw/),
 agrega por seção, extrai percentuais de candidatos principais,
 junt a T1 x T2, calcula baseline de transferência proporcional
 e mede cobertura (seções dentro da tolerância).
-Inclui matching melhorado de candidatos e árvore de decisão rasa.
+Inclui matching melhorado de candidatos, árvore de decisão rasa
+e importância de features.
 Grava apenas saídas processadas em resultados/.
 """
 
@@ -13,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 from sklearn.tree import DecisionTreeRegressor, export_text
 from sklearn.model_selection import train_test_split
+from sklearn.inspection import permutation_importance
 import numpy as np
 
 RAW = Path("data/raw")
@@ -21,7 +23,7 @@ RESULTS.mkdir(exist_ok=True)
 
 SECTION_KEYS = ["SG_UF", "CD_MUNICIPIO", "NR_ZONA", "NR_SECAO"]
 TOLERANCE_PP = 5.0  # tolerância em pontos percentuais para cobertura
-MAX_DEPTH = 3
+MAX_DEPTH = 4
 
 def load_bu_zip(zip_path: Path) -> pd.DataFrame:
     with zipfile.ZipFile(zip_path) as z:
@@ -136,10 +138,12 @@ def compute_coverage(merged: pd.DataFrame, col_t1: str, col_t2: str, tol: float 
     }
 
 def fit_simple_tree(merged: pd.DataFrame, col_t1: str, col_t2: str, max_depth: int = MAX_DEPTH) -> dict:
-    """Ajusta árvore rasa usando features do T1 para prever percentual do T2."""
+    """Ajusta árvore rasa usando features do T1 para prever percentual do T2.
+    Inclui importância de features (Gini e permutação)."""
     features = [c for c in merged.columns if c.startswith("PCT_") and c.endswith("_t1")]
-    if "QT_COMPARECIMENTO_t1" in merged.columns:
-        features.append("QT_COMPARECIMENTO_t1")
+    for extra in ["QT_COMPARECIMENTO_t1", "QT_APTOS_t1", "diff_comparecimento", "razao_comparecimento"]:
+        if extra in merged.columns:
+            features.append(extra)
 
     work = merged[features + [col_t2]].dropna()
     if len(work) < 50:
@@ -160,12 +164,27 @@ def fit_simple_tree(merged: pd.DataFrame, col_t1: str, col_t2: str, max_depth: i
 
     rules = export_text(tree, feature_names=list(features))
 
+    # Importância Gini (feature_importances_)
+    gini_imp = dict(zip(features, tree.feature_importances_))
+    gini_sorted = sorted(gini_imp.items(), key=lambda x: x[1], reverse=True)
+
+    # Importância por permutação (mais confiável)
+    try:
+        perm = permutation_importance(tree, X_test, y_test, n_repeats=10, random_state=42, n_jobs=1)
+        perm_imp = dict(zip(features, perm.importances_mean))
+        perm_sorted = sorted(perm_imp.items(), key=lambda x: x[1], reverse=True)
+    except Exception:
+        perm_sorted = []
+
     return {
         "max_depth": max_depth,
         "cobertura_teste_pct": round(cobertura, 2),
         "erro_medio_teste_pp": round(float(erro.mean()), 2),
         "n_teste": len(y_test),
-        "regras": rules[:2000],  # limita tamanho
+        "n_features": len(features),
+        "regras": rules[:3000],
+        "importancia_gini": gini_sorted,
+        "importancia_permutacao": perm_sorted,
     }
 
 def main():
@@ -237,9 +256,9 @@ def main():
         cov["secoes_join"] = len(merged)
         coverage_reports.append(cov)
 
-        # Árvore de decisão rasa
+        # Árvore de decisão rasa + importância
         tree_result = fit_simple_tree(merged, col_t1, col_t2, MAX_DEPTH)
-        cov["arvore"] = tree_result
+        cov["arvore"] = {k: v for k, v in tree_result.items() if k not in ("regras", "importancia_gini", "importancia_permutacao")}
 
         summary = {
             "uf": uf,
@@ -267,6 +286,18 @@ def main():
                 f.write(f"Árvore rasa (max_depth={MAX_DEPTH}) para {uf}\n")
                 f.write("="*50 + "\n")
                 f.write(tree_result["regras"] + "\n")
+
+        # Salva importância de features
+        if "importancia_gini" in tree_result:
+            with open(RESULTS / f"importancia_features_{uf}.txt", "w", encoding="utf-8") as f:
+                f.write(f"Importância de features — árvore depth={MAX_DEPTH} — {uf}\n")
+                f.write("="*60 + "\n\n")
+                f.write("Importância Gini (feature_importances_):\n")
+                for feat, imp in tree_result["importancia_gini"]:
+                    f.write(f"  {feat}: {imp:.4f}\n")
+                f.write("\nImportância por permutação (mean decrease in score):\n")
+                for feat, imp in tree_result.get("importancia_permutacao", []):
+                    f.write(f"  {feat}: {imp:.4f}\n")
 
     # Resumo geral de cobertura
     if coverage_reports:
