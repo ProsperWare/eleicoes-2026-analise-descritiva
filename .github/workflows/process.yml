@@ -70,7 +70,10 @@ jobs:
           python scripts/download_bu.py --all
         continue-on-error: true
 
-      - name: Processar e gerar resultados
+      - name: Pré-processar BUs (agrega e salva Parquet — só reprocessa se necessário)
+        run: python scripts/preprocess_bu.py
+
+      - name: Processar e gerar resultados (lê Parquet)
         run: python scripts/process_and_summarize.py
 
       - name: Commit resultados
