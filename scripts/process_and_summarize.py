@@ -33,6 +33,11 @@ def to_numeric_safe(s):
 def find_best_candidate_match(merged: pd.DataFrame) -> tuple:
     pct_t1 = [c for c in merged.columns if c.startswith("PCT_") and c.endswith("_t1")]
     pct_t2 = [c for c in merged.columns if c.startswith("PCT_") and c.endswith("_t2")]
+    # fallback se sufixos não existirem
+    if not pct_t1:
+        pct_t1 = [c for c in merged.columns if c.startswith("PCT_") and not c.endswith("_t2") and "T2_" not in c]
+    if not pct_t2:
+        pct_t2 = [c for c in merged.columns if c.startswith("PCT_") and (c.endswith("_t2") or "T2_" in c)]
     if not pct_t1 or not pct_t2:
         return None, None
     best_corr = -1
@@ -50,6 +55,8 @@ def find_best_candidate_match(merged: pd.DataFrame) -> tuple:
 
 def get_features(merged: pd.DataFrame) -> list:
     features = [c for c in merged.columns if c.startswith("PCT_") and c.endswith("_t1")]
+    if not features:
+        features = [c for c in merged.columns if c.startswith("PCT_") and not c.endswith("_t2") and "T2_" not in c]
     for extra in ["QT_COMPARECIMENTO_t1", "QT_APTOS_t1", "diff_comparecimento", "razao_comparecimento"]:
         if extra in merged.columns:
             features.append(extra)
@@ -164,6 +171,9 @@ def main():
         col_t1, col_t2 = find_best_candidate_match(merged)
         if not col_t1:
             print(f"  {uf}: nenhum match de candidato")
+            # debug: mostra colunas PCT
+            pct_cols = [c for c in merged.columns if c.startswith("PCT_")]
+            print(f"    colunas PCT encontradas: {pct_cols[:10]}")
             continue
         print(f"  alvo = {col_t2}")
 

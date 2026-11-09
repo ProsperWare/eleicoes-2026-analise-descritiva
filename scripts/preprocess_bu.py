@@ -95,6 +95,13 @@ def needs_rebuild(zip_path: Path, parquet_path: Path) -> bool:
         return True
     return zip_path.stat().st_mtime > parquet_path.stat().st_mtime
 
+def force_suffix(df: pd.DataFrame, suffix: str, keys: list) -> pd.DataFrame:
+    rename = {}
+    for c in df.columns:
+        if c not in keys and not c.endswith(suffix):
+            rename[c] = f"{c}{suffix}"
+    return df.rename(columns=rename)
+
 def main():
     zips = sorted(RAW.glob("bweb_*.zip"))
     print(f"Zips encontrados: {len(zips)}")
@@ -135,25 +142,20 @@ def main():
         if not t2k:
             continue
         join_path = PROCESSED / f"join_{uf}.parquet"
-        # Rebuild join se algum dos lados foi reconstruído ou não existe
-        t1_zip = next((z for z in zips if z.stem == t1k), None)
-        t2_zip = next((z for z in zips if z.stem == t2k), None)
-        if (t1_zip and needs_rebuild(t1_zip, PROCESSED / f"{t1k}.parquet")) or \
-           (t2_zip and needs_rebuild(t2_zip, PROCESSED / f"{t2k}.parquet")) or \
-           not join_path.exists():
-            df1 = section_dfs[t1k]
-            df2 = section_dfs[t2k]
-            keys = [c for c in SECTION_KEYS if c in df1.columns and c in df2.columns]
-            if not keys:
-                continue
-            merged = df1.merge(df2, on=keys, how="inner", suffixes=("_t1", "_t2"))
-            if "QT_COMPARECIMENTO_t1" in merged.columns and "QT_COMPARECIMENTO_t2" in merged.columns:
-                merged["diff_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] - merged["QT_COMPARECIMENTO_t1"]
-                merged["razao_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] / merged["QT_COMPARECIMENTO_t1"].replace(0, pd.NA)
-            merged.to_parquet(join_path, index=False)
-            print(f"  Join {uf}: {len(merged)} seções salvas")
-        else:
-            print(f"  Join {uf}: cache válido")
+        # Sempre reconstrói o join para garantir sufixos corretos
+        df1 = section_dfs[t1k]
+        df2 = section_dfs[t2k]
+        keys = [c for c in SECTION_KEYS if c in df1.columns and c in df2.columns]
+        if not keys:
+            continue
+        df1_s = force_suffix(df1, "_t1", keys)
+        df2_s = force_suffix(df2, "_t2", keys)
+        merged = df1_s.merge(df2_s, on=keys, how="inner")
+        if "QT_COMPARECIMENTO_t1" in merged.columns and "QT_COMPARECIMENTO_t2" in merged.columns:
+            merged["diff_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] - merged["QT_COMPARECIMENTO_t1"]
+            merged["razao_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] / merged["QT_COMPARECIMENTO_t1"].replace(0, pd.NA)
+        merged.to_parquet(join_path, index=False)
+        print(f"  Join {uf}: {len(merged)} seções salvas (com sufixos)")
 
     print(f"\nPré-processamento concluído. Reconstruídos: {rebuilt} arquivos.")
     print(f"Dados em {PROCESSED}")
