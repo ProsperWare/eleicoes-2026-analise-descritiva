@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Exploração combinatorial de subconjuntos de features no split mult3.
-Para cada UF, enumera combinações de features (tamanho 1 a 5) e avalia
-se a árvore de decisão supera o logit em cobertura/acurácia no teste.
+Exploração combinatorial + Random Forest no split mult3.
+Compara árvore simples, logit e Random Forest (não-linear) na capacidade
+de explicar o resultado do T2 a partir do T1 nos dados oficiais do TSE.
 """
 
 import zipfile
 from pathlib import Path
 import pandas as pd
 from sklearn.tree import DecisionTreeRegressor, export_text
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
@@ -24,11 +25,12 @@ TOLERANCE_PP = 5.0
 MAX_DEPTH = 4
 BINARY_THRESHOLD = 50.0
 MIN_SAMPLES_LEAF = 15
-MAX_SUBSET_SIZE = 5  # limite para exploração combinatorial
+MAX_SUBSET_SIZE = 5
+RF_N_ESTIMATORS = 100
+RF_MAX_DEPTH = 8
 
-# Principais candidatos presidenciais 2022 (número de urna)
-DIREITA_PRES = {"22", "15"}          # Bolsonaro, Tebet (aproximação)
-ESQUERDA_PRES = {"13", "12", "30"}   # Lula, Ciro, outros à esquerda
+DIREITA_PRES = {"22", "15"}
+ESQUERDA_PRES = {"13", "12", "30"}
 
 def load_bu_zip(zip_path: Path) -> pd.DataFrame:
     with zipfile.ZipFile(zip_path) as z:
@@ -146,7 +148,6 @@ def evaluate_regression(model, X, y):
     return round(cob, 2), round(float(erro.mean()), 2)
 
 def evaluate_subset_full(features_subset, train_df, test_df, col_t2):
-    """Avalia árvore e logit no subconjunto."""
     if not features_subset or len(train_df) < 30:
         return None, None, None, None, None
     X_tr = train_df[features_subset]
@@ -156,13 +157,11 @@ def evaluate_subset_full(features_subset, train_df, test_df, col_t2):
     if len(X_tr) < 30:
         return None, None, None, None, None
 
-    # Árvore
     tree = DecisionTreeRegressor(max_depth=MAX_DEPTH, random_state=42, min_samples_leaf=MIN_SAMPLES_LEAF)
     tree.fit(X_tr, y_tr)
     cob_tr, _ = evaluate_regression(tree, X_tr, y_tr)
     cob_te, _ = evaluate_regression(tree, X_te, y_te) if len(X_te) > 0 else (None, None)
 
-    # Logit (binário)
     logit_acc = None
     y_bin_tr = (y_tr >= BINARY_THRESHOLD).astype(int)
     if y_bin_tr.nunique() >= 2 and len(X_te) > 0:
@@ -181,18 +180,15 @@ def evaluate_subset_full(features_subset, train_df, test_df, col_t2):
     return cob_te, cob_tr, tree, logit_acc, features_subset
 
 def explore_combinations(all_features, train_clean, test_clean, col_t2):
-    """Explora combinações até MAX_SUBSET_SIZE e retorna a melhor árvore e as que batem o logit."""
     if not all_features:
         return None, [], None
 
-    # Baseline logit com todas as features
     _, _, _, baseline_logit, _ = evaluate_subset_full(all_features, train_clean, test_clean, col_t2)
 
     best_cob_te = -1
     best_result = None
-    beating_logit = []  # subsets onde árvore > logit
+    beating_logit = []
 
-    # Gera combinações de tamanho 1 a MAX_SUBSET_SIZE
     max_size = min(MAX_SUBSET_SIZE, len(all_features))
     for size in range(1, max_size + 1):
         for subset_tuple in combinations(all_features, size):
@@ -202,11 +198,9 @@ def explore_combinations(all_features, train_clean, test_clean, col_t2):
             )
             if cob_te is None:
                 continue
-            # Melhor árvore absoluta
             if cob_te > best_cob_te:
                 best_cob_te = cob_te
                 best_result = (feats, cob_te, cob_tr, tree, logit_acc)
-            # Se bate o logit baseline
             if baseline_logit is not None and cob_te > baseline_logit:
                 beating_logit.append({
                     "features": feats,
@@ -216,9 +210,8 @@ def explore_combinations(all_features, train_clean, test_clean, col_t2):
                     "delta": round(cob_te - baseline_logit, 2)
                 })
 
-    # Ordena as que batem o logit por delta
     beating_logit.sort(key=lambda x: x["delta"], reverse=True)
-    return best_result, beating_logit[:10], baseline_logit  # top 10
+    return best_result, beating_logit[:10], baseline_logit
 
 def main():
     zips = sorted(RAW.glob("bweb_*.zip"))
@@ -277,7 +270,7 @@ def main():
             print(f"  {uf}: poucas seções válidas no treino após dropna ({len(train_clean)})")
             continue
         print(f"  {uf}: {len(all_features)} features | explorando combinações até tamanho {MAX_SUBSET_SIZE}")
-        # Exploração combinatorial
+
         best_result, beating, baseline_logit = explore_combinations(
             all_features, train_clean, test_clean, col_t2
         )
@@ -285,23 +278,47 @@ def main():
             print(f"  {uf}: nenhuma combinação válida")
             continue
         best_feats, cob_te, cob_tr, best_tree, logit_best = best_result
-        print(f"  {uf}: melhor árvore teste={cob_te}% | logit baseline={baseline_logit}% | {len(beating)} subsets batem o logit")
-        # Regras da melhor árvore
+
+        # Random Forest com todas as features (baseline não-linear)
+        rf_cob_te = None
+        try:
+            X_tr_all = train_clean[all_features]
+            y_tr_all = train_clean[col_t2]
+            X_te_all = test_clean[all_features] if len(test_clean) > 0 else pd.DataFrame()
+            y_te_all = test_clean[col_t2] if len(test_clean) > 0 else pd.Series(dtype=float)
+            rf = RandomForestRegressor(
+                n_estimators=RF_N_ESTIMATORS,
+                max_depth=RF_MAX_DEPTH,
+                min_samples_leaf=MIN_SAMPLES_LEAF,
+                random_state=42,
+                n_jobs=-1
+            )
+            rf.fit(X_tr_all, y_tr_all)
+            rf_cob_te, _ = evaluate_regression(rf, X_te_all, y_te_all) if len(X_te_all) > 0 else (None, None)
+            print(f"  {uf}: Random Forest teste={rf_cob_te}%")
+        except Exception as e:
+            print(f"  {uf}: erro no RF: {e}")
+            rf_cob_te = None
+
+        print(f"  {uf}: melhor árvore={cob_te}% | logit={baseline_logit}% | RF={rf_cob_te}% | {len(beating)} subsets > logit")
+
         rules = ""
         if best_tree is not None:
             rules = export_text(best_tree, feature_names=list(best_feats))[:3000]
         with open(RESULTS / f"regras_mult3_{uf}.txt", "w", encoding="utf-8") as f:
-            f.write(f"Melhor árvore (exploração combinatorial) nos múltiplos de 3 — {uf}\n")
-            f.write(f"Features ({len(best_feats)}): {', '.join(best_feats)}\n")
-            f.write(f"Cobertura árvore teste: {cob_te}% | treino: {cob_tr}%\n")
-            f.write(f"Logit baseline (todas features): {baseline_logit}%\n")
-            f.write(f"Subsets que batem o logit: {len(beating)}\n")
+            f.write(f"Melhor árvore (combinatorial) + comparação RF — {uf}\n")
+            f.write(f"Features melhor árvore ({len(best_feats)}): {', '.join(best_feats)}\n")
+            f.write(f"Árvore teste: {cob_te}% | treino: {cob_tr}%\n")
+            f.write(f"Logit baseline: {baseline_logit}%\n")
+            f.write(f"Random Forest (todas features): {rf_cob_te}%\n")
+            f.write(f"Subsets árvore > logit: {len(beating)}\n")
             f.write("="*50 + "\n")
             f.write(rules + "\n")
             if beating:
                 f.write("\nTop subsets que superam o logit:\n")
                 for b in beating[:5]:
                     f.write(f"  {b['n']} feats | árvore={b['arvore_teste']}% | delta={b['delta']}% | {', '.join(b['features'][:3])}...\n")
+
         summary.append({
             "uf": uf,
             "n_treino": len(train_clean),
@@ -309,21 +326,23 @@ def main():
             "n_features_best": len(best_feats),
             "arvore_teste": cob_te,
             "logit_baseline": baseline_logit,
+            "rf_teste": rf_cob_te,
             "n_beating": len(beating),
             "best_delta": beating[0]["delta"] if beating else None,
         })
+
     status_lines = [f"UFs processadas: {len(summary)}"]
     if summary:
         with open(RESULTS / "resumo_mult3.txt", "w", encoding="utf-8") as f:
-            f.write("Resumo: exploração combinatorial de subconjuntos (tamanho 1-5) no split mult3\n")
-            f.write("Objetivo: encontrar árvores que superem o logit baseline\n")
+            f.write("Resumo: combinatorial + Random Forest no split mult3\n")
+            f.write("Compara árvore simples, logit e RF (não-linear)\n")
             f.write("Caminho dos dados: /home/alexa/eleicoes-data/raw\n")
-            f.write("="*80 + "\n")
-            f.write(f"{'UF':<6} {'Treino':>8} {'Teste':>8} {'NFeat':>6} {'ArvTe%':>8} {'LogitBase%':>12} {'NBeating':>9} {'BestDelta':>10}\n")
-            f.write("-"*80 + "\n")
+            f.write("="*100 + "\n")
+            f.write(f"{'UF':<6} {'Treino':>8} {'Teste':>8} {'NFeat':>6} {'ArvTe%':>8} {'Logit%':>8} {'RF%':>8} {'NBeating':>9} {'BestDelta':>10}\n")
+            f.write("-"*100 + "\n")
             for m in summary:
-                f.write(f"{m['uf']:<6} {m['n_treino']:>8} {m['n_teste']:>8} {m['n_features_best']:>6} {str(m['arvore_teste']):>8} {str(m['logit_baseline']):>12} {m['n_beating']:>9} {str(m['best_delta']):>10}\n")
-        status_lines.append("resumo_mult3.txt escrito (exploração combinatorial)")
+                f.write(f"{m['uf']:<6} {m['n_treino']:>8} {m['n_teste']:>8} {m['n_features_best']:>6} {str(m['arvore_teste']):>8} {str(m['logit_baseline']):>8} {str(m['rf_teste']):>8} {m['n_beating']:>9} {str(m['best_delta']):>10}\n")
+        status_lines.append("resumo_mult3.txt escrito (com RF)")
     else:
         status_lines.append("Nenhuma UF gerou resumo")
     (RESULTS / "status.txt").write_text("\n".join(status_lines) + "\n", encoding="utf-8")
