@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Exploração combinatorial + Random Forest no split mult3.
-Inclui análise de seções com alta variação de comparecimento, logit reverso
-e perfil de seções com |residual| > 5 p.p.
+Inclui perfil de seções com |residual| > 5 p.p. e distribuição por faixa de residual.
 """
 
 from pathlib import Path
@@ -26,7 +25,6 @@ MIN_SAMPLES_LEAF = 15
 MAX_SUBSET_SIZE = 5
 RF_N_ESTIMATORS = 100
 RF_MAX_DEPTH = 8
-MIGRACAO_LIMIAR_VOTOS = 30
 RESIDUAL_ALTO = 5.0
 
 def to_numeric_safe(s):
@@ -148,8 +146,8 @@ def explore_combinations(all_features, train_clean, test_clean, col_t2):
     beating_logit.sort(key=lambda x: x["delta"], reverse=True)
     return best_result, beating_logit[:10], baseline_logit
 
-def perfil_residual_alto(train_clean, test_clean, features, col_t2, uf):
-    """Perfil das seções com |residual| > 5 p.p."""
+def residual_e_distribuicao(train_clean, test_clean, features, col_t2, uf):
+    """Calcula residual e retorna perfil alto + bins de distribuição."""
     try:
         X_tr = train_clean[features]
         y_tr = train_clean[col_t2]
@@ -159,7 +157,7 @@ def perfil_residual_alto(train_clean, test_clean, features, col_t2, uf):
         lin.fit(X_tr_s, y_tr)
 
         if len(test_clean) == 0:
-            return None
+            return None, None
         X_te = test_clean[features]
         y_te = test_clean[col_t2]
         pred = lin.predict(scaler.transform(X_te))
@@ -168,41 +166,32 @@ def perfil_residual_alto(train_clean, test_clean, features, col_t2, uf):
         detail = test_clean.copy()
         detail["residual"] = residual.values
         detail["abs_residual"] = detail["residual"].abs()
-        detail["aptos"] = detail.get("QT_APTOS_t1", pd.Series(np.nan, index=detail.index))
-        detail["diff_comp"] = detail.get("diff_comparecimento", pd.Series(np.nan, index=detail.index))
-        if "QT_COMPARECIMENTO_t1" in detail.columns and "QT_APTOS_t1" in detail.columns:
-            detail["abst_t1"] = 1 - (detail["QT_COMPARECIMENTO_t1"] / detail["QT_APTOS_t1"].replace(0, pd.NA))
-        else:
-            detail["abst_t1"] = np.nan
 
-        # polarização aproximada: max PCT T1
-        pct_t1_cols = [c for c in detail.columns if c.startswith("PCT_") and c.endswith("_t1")]
-        if pct_t1_cols:
-            detail["polarizacao_t1"] = detail[pct_t1_cols].max(axis=1)
-        else:
-            detail["polarizacao_t1"] = np.nan
+        # Distribuição por faixas de 1 p.p.
+        bins = np.arange(-20, 21, 1)
+        counts, edges = np.histogram(detail["residual"].dropna(), bins=bins)
+        dist = pd.DataFrame({
+            "faixa_ini": edges[:-1],
+            "faixa_fim": edges[1:],
+            "n": counts,
+        })
+        dist = dist[dist["n"] > 0]
+        dist.to_csv(RESULTS / f"residual_dist_{uf}.csv", index=False)
 
+        # Perfil alto
         alto = detail[detail["abs_residual"] > RESIDUAL_ALTO]
-        if len(alto) < 5:
-            return None
+        perfil = None
+        if len(alto) >= 5:
+            perfil = {
+                "n_alto": len(alto),
+                "pct_alto": round(100 * len(alto) / len(detail), 2),
+                "res_medio": round(alto["residual"].mean(), 2),
+            }
 
-        # salva detalhe
-        id_cols = [c for c in ["SG_UF", "CD_MUNICIPIO", "NR_ZONA", "NR_SECAO"] if c in alto.columns]
-        keep = id_cols + ["residual", "abs_residual", "aptos", "diff_comp", "abst_t1", "polarizacao_t1"]
-        alto[keep].to_parquet(RESULTS / f"residual_alto_{uf}.parquet", index=False)
-
-        return {
-            "n_alto": len(alto),
-            "pct_alto": round(100 * len(alto) / len(detail), 2),
-            "aptos_medio": round(alto["aptos"].mean(), 1) if alto["aptos"].notna().any() else None,
-            "abst_medio": round(alto["abst_t1"].mean() * 100, 1) if alto["abst_t1"].notna().any() else None,
-            "diff_medio": round(alto["diff_comp"].mean(), 1) if alto["diff_comp"].notna().any() else None,
-            "polar_medio": round(alto["polarizacao_t1"].mean(), 1) if alto["polarizacao_t1"].notna().any() else None,
-            "res_medio": round(alto["residual"].mean(), 2),
-        }
+        return perfil, dist
     except Exception as e:
-        print(f"  perfil residual {uf}: {e}")
-        return None
+        print(f"  residual {uf}: {e}")
+        return None, None
 
 def main():
     join_files = sorted(PROCESSED.glob("join_*.parquet"))
@@ -214,6 +203,7 @@ def main():
 
     summary = []
     perfil_rows = []
+    all_dist = []
     for jf in join_files:
         uf = jf.stem.replace("join_", "")
         print(f"\nProcessando {uf}...")
@@ -251,11 +241,12 @@ def main():
             continue
         best_feats, cob_te, cob_tr, best_tree, logit_best = best_result
 
-        # Perfil residual alto
-        perfil = perfil_residual_alto(train_clean, test_clean, all_features, col_t2, uf)
+        perfil, dist = residual_e_distribuicao(train_clean, test_clean, all_features, col_t2, uf)
         if perfil:
             perfil_rows.append({"uf": uf, **perfil})
-            print(f"  residual alto: n={perfil['n_alto']} ({perfil['pct_alto']}%)")
+        if dist is not None and len(dist) > 0:
+            dist["uf"] = uf
+            all_dist.append(dist)
 
         rules = ""
         if best_tree is not None:
@@ -286,14 +277,18 @@ def main():
     if perfil_rows:
         with open(RESULTS / "perfil_residual_alto.txt", "w", encoding="utf-8") as f:
             f.write(f"Seções com |residual| > {RESIDUAL_ALTO} p.p.\n")
-            f.write("aptos_medio = QT_APTOS médio | abst_medio = taxa abstenção T1 (%)\n")
-            f.write("diff_medio = diff_comparecimento médio | polar_medio = max PCT T1\n")
-            f.write("="*90 + "\n")
-            f.write(f"{'UF':<6} {'NAlto':>7} {'%Alto':>7} {'Aptos':>7} {'Abst%':>7} {'Diff':>7} {'Polar':>7} {'ResMed':>8}\n")
-            f.write("-"*90 + "\n")
+            f.write("="*40 + "\n")
+            f.write(f"{'UF':<6} {'NAlto':>7} {'%Alto':>7} {'ResMed':>8}\n")
             for r in perfil_rows:
-                f.write(f"{r['uf']:<6} {r['n_alto']:>7} {r['pct_alto']:>7} {str(r.get('aptos_medio')):>7} {str(r.get('abst_medio')):>7} {str(r.get('diff_medio')):>7} {str(r.get('polar_medio')):>7} {str(r.get('res_medio')):>8}\n")
-        status_lines.append("perfil_residual_alto.txt + residual_alto_*.parquet escritos")
+                f.write(f"{r['uf']:<6} {r['n_alto']:>7} {r['pct_alto']:>7} {str(r.get('res_medio')):>8}\n")
+        status_lines.append("perfil_residual_alto.txt escrito")
+
+    if all_dist:
+        full_dist = pd.concat(all_dist, ignore_index=True)
+        # agrega nacional
+        nacional = full_dist.groupby(["faixa_ini", "faixa_fim"])["n"].sum().reset_index()
+        nacional.to_csv(RESULTS / "residual_dist_nacional.csv", index=False)
+        status_lines.append("residual_dist_*.csv + residual_dist_nacional.csv escritos")
 
     (RESULTS / "status.txt").write_text("\n".join(status_lines) + "\n", encoding="utf-8")
     print(f"\nResultados em {RESULTS.resolve()}")
