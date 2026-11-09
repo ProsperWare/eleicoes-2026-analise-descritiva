@@ -52,7 +52,6 @@ jobs:
         run: |
           SHARED="/home/alexa/eleicoes-data/raw"
           mkdir -p "$SHARED"
-          # Se a pasta data/raw do workspace não existir ou estiver vazia, usa a compartilhada
           if [ ! -d data/raw ] || [ -z "$(ls -A data/raw 2>/dev/null)" ]; then
             mkdir -p data
             ln -sfn "$SHARED" data/raw
@@ -63,12 +62,19 @@ jobs:
 
       - name: Download BUs (só o que falta)
         run: |
-          # O script download_bu.py deve pular arquivos que já existem
           python scripts/download_bu.py --all
         continue-on-error: true
 
       - name: Processar e gerar resultados
         run: python scripts/process_and_summarize.py
+
+      - name: Diagnóstico resultados
+        run: |
+          echo "PWD: $(pwd)"
+          echo "--- ls resultados/ ---"
+          ls -la resultados/ || echo "pasta resultados não existe"
+          echo "--- ls /home/alexa/eleicoes-2026-analise-descritiva/resultados/ ---"
+          ls -la /home/alexa/eleicoes-2026-analise-descritiva/resultados/ || echo "não existe no DEST"
 
       - name: Imprimir resumo mult3
         run: |
