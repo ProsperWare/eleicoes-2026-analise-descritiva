@@ -9,6 +9,12 @@ on:
       - 'requirements.txt'
   workflow_dispatch:
 
+# Runner único: pushes seguidos no mesmo ref cancelam a run anterior
+# e deixam só a mais recente seguir.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -85,5 +91,31 @@ jobs:
             echo "Nada para commitar em resultados/"
           else
             git commit -m "Atualiza resultados [skip ci]"
-            git push
+            # actions/checkout deixa HEAD detached no SHA do disparo.
+            # Integra origin/main e envia HEAD:main, com retentativas se o remoto avançar.
+            attempts=3
+            for attempt in 1 2 3; do
+              if ! git fetch origin main; then
+                echo "git fetch origin main falhou (tentativa ${attempt}/${attempts})"
+              elif ! git pull --rebase origin main; then
+                if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
+                  git rebase --abort
+                  echo "Conflito ao integrar origin/main; rebase abortado"
+                  exit 1
+                fi
+                echo "git pull --rebase origin main falhou (tentativa ${attempt}/${attempts})"
+              elif git push origin HEAD:main; then
+                echo "Resultados enviados para main"
+                exit 0
+              else
+                echo "Push rejeitado (tentativa ${attempt}/${attempts}): o remoto contém commits que não estão no checkout"
+              fi
+              if [ "$attempt" -lt "$attempts" ]; then
+                sleep_for=$((attempt * 2))
+                echo "Nova tentativa em ${sleep_for}s"
+                sleep "$sleep_for"
+              fi
+            done
+            echo "Falha ao enviar resultados para main após ${attempts} tentativas"
+            exit 1
           fi
