@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Treina modelos (árvore, linear, logit) apenas nas seções múltiplas de 3
-e avalia no restante. Gera resumo por UF.
+e avalia no restante. Features incluem cargos federais do T1.
 """
 
 import zipfile
@@ -22,6 +22,10 @@ TOLERANCE_PP = 5.0
 MAX_DEPTH = 4
 BINARY_THRESHOLD = 50.0
 
+# Principais candidatos presidenciais 2022 (número de urna)
+DIREITA_PRES = {"22", "15"}          # Bolsonaro, Tebet (aproximação)
+ESQUERDA_PRES = {"13", "12", "30"}   # Lula, Ciro, outros à esquerda
+
 def load_bu_zip(zip_path: Path) -> pd.DataFrame:
     with zipfile.ZipFile(zip_path) as z:
         csv_names = [n for n in z.namelist() if n.lower().endswith((".csv", ".txt"))]
@@ -40,27 +44,35 @@ def load_bu_zip(zip_path: Path) -> pd.DataFrame:
 def to_numeric_safe(s):
     return pd.to_numeric(s, errors="coerce").fillna(0)
 
-def extract_candidate_pcts(df: pd.DataFrame, keys: list, cargo_code: str = None, top_n: int = 3) -> pd.DataFrame:
-    if "QT_VOTOS" not in df.columns:
+def extract_cargo_pcts(df: pd.DataFrame, keys: list, cargo_code: str, top_n: int = 3, prefix: str = "") -> pd.DataFrame:
+    if "QT_VOTOS" not in df.columns or "CD_CARGO" not in df.columns:
         return pd.DataFrame()
-    work = df.copy()
-    work["QT_VOTOS"] = to_numeric_safe(work["QT_VOTOS"])
-    if cargo_code and "CD_CARGO" in work.columns:
-        work = work[work["CD_CARGO"] == cargo_code]
+    work = df[df["CD_CARGO"] == cargo_code].copy()
     if work.empty:
         return pd.DataFrame()
+    work["QT_VOTOS"] = to_numeric_safe(work["QT_VOTOS"])
     totals = work.groupby(keys)["QT_VOTOS"].sum().reset_index().rename(columns={"QT_VOTOS": "TOTAL_VOTOS"})
     cand_totals = work.groupby(["NR_VOTAVEL", "NM_VOTAVEL"])["QT_VOTOS"].sum().reset_index()
     top_cands = cand_totals.nlargest(top_n, "QT_VOTOS")["NR_VOTAVEL"].tolist()
-    result = totals.copy()
+    result = totals[keys].copy()
     for nr in top_cands:
         name = cand_totals.loc[cand_totals["NR_VOTAVEL"] == nr, "NM_VOTAVEL"].iloc[0]
-        safe_name = "".join(c if c.isalnum() else "_" for c in str(name)[:40])
-        col = f"PCT_{safe_name}"
+        safe = "".join(c if c.isalnum() else "_" for c in str(name)[:30])
+        col = f"PCT_{prefix}{safe}"
         cand_votes = work[work["NR_VOTAVEL"] == nr].groupby(keys)["QT_VOTOS"].sum().reset_index()
         cand_votes = cand_votes.merge(totals, on=keys, how="left")
         cand_votes[col] = (cand_votes["QT_VOTOS"] / cand_votes["TOTAL_VOTOS"].replace(0, pd.NA)) * 100
         result = result.merge(cand_votes[keys + [col]], on=keys, how="left")
+    # Agregado direita/esquerda só para presidente
+    if cargo_code == "1":
+        dir_votes = work[work["NR_VOTAVEL"].isin(DIREITA_PRES)].groupby(keys)["QT_VOTOS"].sum().reset_index()
+        esq_votes = work[work["NR_VOTAVEL"].isin(ESQUERDA_PRES)].groupby(keys)["QT_VOTOS"].sum().reset_index()
+        dir_votes = dir_votes.merge(totals, on=keys, how="left")
+        esq_votes = esq_votes.merge(totals, on=keys, how="left")
+        dir_votes["PCT_DIR_PRES"] = (dir_votes["QT_VOTOS"] / dir_votes["TOTAL_VOTOS"].replace(0, pd.NA)) * 100
+        esq_votes["PCT_ESQ_PRES"] = (esq_votes["QT_VOTOS"] / esq_votes["TOTAL_VOTOS"].replace(0, pd.NA)) * 100
+        result = result.merge(dir_votes[keys + ["PCT_DIR_PRES"]], on=keys, how="left")
+        result = result.merge(esq_votes[keys + ["PCT_ESQ_PRES"]], on=keys, how="left")
     return result
 
 def aggregate_section(df: pd.DataFrame, label: str) -> pd.DataFrame:
@@ -74,9 +86,17 @@ def aggregate_section(df: pd.DataFrame, label: str) -> pd.DataFrame:
             tmp[col] = to_numeric_safe(tmp[col])
             agg = agg.merge(tmp, on=keys, how="left")
     is_t2 = "2t" in label.lower()
-    pcts = extract_candidate_pcts(df, keys, cargo_code="1" if is_t2 else None, top_n=2 if is_t2 else 3)
-    if not pcts.empty:
-        agg = agg.merge(pcts, on=keys, how="left")
+    if is_t2:
+        # T2: só presidente (cargo 1), top 2
+        pcts = extract_cargo_pcts(df, keys, "1", top_n=2, prefix="T2_")
+        if not pcts.empty:
+            agg = agg.merge(pcts, on=keys, how="left")
+    else:
+        # T1: cargos federais
+        for cargo, prefix, top in [("1", "PRES_", 3), ("3", "GOV_", 2), ("5", "SEN_", 2), ("6", "DEP_", 2)]:
+            pcts = extract_cargo_pcts(df, keys, cargo, top_n=top, prefix=prefix)
+            if not pcts.empty:
+                agg = agg.merge(pcts, on=keys, how="left")
     agg["origem"] = label
     return agg
 
@@ -165,7 +185,6 @@ def main():
         if train is None or len(train) < 30:
             continue
         features = get_features(merged)
-        # Remove NaN no alvo e nas features
         train_clean = train.dropna(subset=[col_t2] + features)
         test_clean = test.dropna(subset=[col_t2] + features)
         if len(train_clean) < 30:
@@ -201,7 +220,6 @@ def main():
                 logit_acc = round(100 * accuracy_score(y_bin_test, pred_bin), 2)
             except Exception:
                 logit_acc = None
-        # Salva regras
         with open(RESULTS / f"regras_mult3_{uf}.txt", "w", encoding="utf-8") as f:
             f.write(f"Árvore treinada nos múltiplos de 3 — {uf}\n")
             f.write("="*50 + "\n")
@@ -219,6 +237,7 @@ def main():
     if summary:
         with open(RESULTS / "resumo_mult3.txt", "w", encoding="utf-8") as f:
             f.write("Resumo: modelos treinados apenas nos múltiplos de 3\n")
+            f.write("Features: cargos federais T1 (pres, gov, sen, dep) + agregados dir/esq\n")
             f.write("="*70 + "\n")
             f.write(f"{'UF':<6} {'Treino':>8} {'Teste':>8} {'ArvTr%':>8} {'ArvTe%':>8} {'LinTr%':>8} {'LinTe%':>8} {'LogitTe%':>10}\n")
             f.write("-"*70 + "\n")
