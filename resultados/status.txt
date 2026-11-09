@@ -1,2 +1,3 @@
 UFs processadas: 28
 resumo_mult3.txt escrito (com RF)
+residual_vs_novos.txt + residual_secao_*.parquet + residual_zona_*.csv escritos
