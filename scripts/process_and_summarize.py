@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
 Exploração combinatorial + Random Forest no split mult3.
-Lê dados já pré-processados (joins T1×T2 por UF) de /home/alexa/eleicoes-data/processed/.
-Compara árvore simples, logit e Random Forest nos dados oficiais do TSE.
-Inclui residual do logit vs novos votantes, tamanho e abstenção (por seção e zona).
+Inclui análise de seções com alta variação de comparecimento e logit reverso.
 """
 
 from pathlib import Path
@@ -27,6 +25,7 @@ MIN_SAMPLES_LEAF = 15
 MAX_SUBSET_SIZE = 5
 RF_N_ESTIMATORS = 100
 RF_MAX_DEPTH = 8
+MIGRACAO_LIMIAR_VOTOS = 30  # |diff_comparecimento| acima disso
 
 def to_numeric_safe(s):
     return pd.to_numeric(s, errors="coerce").fillna(0)
@@ -147,70 +146,66 @@ def explore_combinations(all_features, train_clean, test_clean, col_t2):
     beating_logit.sort(key=lambda x: x["delta"], reverse=True)
     return best_result, beating_logit[:10], baseline_logit
 
-def residual_analysis(train_clean, test_clean, features, col_t2, uf):
-    """Residual do linear vs diff_comp, tamanho e abstenção.
-    Salva detalhe por seção e resumo por zona.
-    """
+def migracao_e_reverso(train_clean, test_clean, features, col_t1, col_t2, uf):
+    """Seções com alta |diff_comp| + logit reverso (T2 -> T1)."""
+    if "diff_comparecimento" not in test_clean.columns or col_t1 not in test_clean.columns:
+        return None
     try:
+        # Logit normal (T1 -> T2) só nas seções de alta migração
+        alta = test_clean[test_clean["diff_comparecimento"].abs() >= MIGRACAO_LIMIAR_VOTOS]
+        if len(alta) < 20:
+            return None
+
         X_tr = train_clean[features]
         y_tr = train_clean[col_t2]
         scaler = StandardScaler()
         X_tr_s = scaler.fit_transform(X_tr)
         lin = LinearRegression()
         lin.fit(X_tr_s, y_tr)
-        if len(test_clean) == 0:
-            return None
-        X_te = test_clean[features]
-        y_te = test_clean[col_t2]
-        X_te_s = scaler.transform(X_te)
-        pred = lin.predict(X_te_s)
-        residual = y_te - pred
 
-        detail = test_clean.copy()
-        detail["residual"] = residual.values
-        detail["diff_comp"] = detail.get("diff_comparecimento", pd.Series(np.nan, index=detail.index))
-        detail["aptos"] = detail.get("QT_APTOS_t1", pd.Series(np.nan, index=detail.index))
-        # taxa de abstenção aproximada
-        if "QT_COMPARECIMENTO_t1" in detail.columns and "QT_APTOS_t1" in detail.columns:
-            detail["abst_t1"] = 1 - (detail["QT_COMPARECIMENTO_t1"] / detail["QT_APTOS_t1"].replace(0, pd.NA))
+        X_alta = alta[features]
+        y_alta = alta[col_t2]
+        pred_alta = lin.predict(scaler.transform(X_alta))
+        residual_alta = y_alta - pred_alta
+        cob_alta, err_alta = evaluate_regression(lin, scaler.transform(X_alta), y_alta)
+
+        # Logit reverso: features do T2 para prever T1
+        features_t2 = [c for c in test_clean.columns if c.startswith("PCT_") and (c.endswith("_t2") or "T2_" in c)]
+        if not features_t2 or col_t1 not in train_clean.columns:
+            return {
+                "n_alta": len(alta),
+                "cob_alta": cob_alta,
+                "err_alta": err_alta,
+                "res_medio_alta": round(float(residual_alta.mean()), 2),
+            }
+
+        # treina reverso no treino
+        X_tr_rev = train_clean[features_t2].dropna()
+        if len(X_tr_rev) < 30:
+            return None
+        y_tr_rev = train_clean.loc[X_tr_rev.index, col_t1]
+        scaler_rev = StandardScaler()
+        X_tr_rev_s = scaler_rev.fit_transform(X_tr_rev)
+        lin_rev = LinearRegression()
+        lin_rev.fit(X_tr_rev_s, y_tr_rev)
+
+        # avalia reverso nas seções de alta migração
+        X_alta_rev = alta[features_t2].dropna()
+        if len(X_alta_rev) < 10:
+            cob_rev = None
         else:
-            detail["abst_t1"] = np.nan
-
-        id_cols = [c for c in ["SG_UF", "CD_MUNICIPIO", "NR_ZONA", "NR_SECAO"] if c in detail.columns]
-        keep = id_cols + ["residual", "diff_comp", "aptos", "abst_t1", col_t2]
-        detail = detail[[c for c in keep if c in detail.columns]].dropna(subset=["residual"])
-        if len(detail) < 10:
-            return None
-
-        detail.to_parquet(RESULTS / f"residual_secao_{uf}.parquet", index=False)
-
-        # resumo por zona
-        if "NR_ZONA" in detail.columns:
-            zona = detail.groupby("NR_ZONA").agg(
-                n=("residual", "count"),
-                res_medio=("residual", "mean"),
-                res_mediano=("residual", "median"),
-                diff_medio=("diff_comp", "mean"),
-                aptos_medio=("aptos", "mean"),
-                abst_medio=("abst_t1", "mean"),
-            ).reset_index()
-            for c in ["res_medio", "res_mediano", "diff_medio", "aptos_medio", "abst_medio"]:
-                if c in zona.columns:
-                    zona[c] = zona[c].round(2)
-            zona.to_csv(RESULTS / f"residual_zona_{uf}.csv", index=False)
-
-        def safe_corr(a, b):
-            v = pd.DataFrame({"a": a, "b": b}).dropna()
-            return round(v["a"].corr(v["b"]), 3) if len(v) > 5 else None
+            y_alta_rev = alta.loc[X_alta_rev.index, col_t1]
+            cob_rev, _ = evaluate_regression(lin_rev, scaler_rev.transform(X_alta_rev), y_alta_rev)
 
         return {
-            "corr_diff": safe_corr(detail["residual"], detail["diff_comp"]),
-            "corr_aptos": safe_corr(detail["residual"], detail["aptos"]),
-            "corr_abst": safe_corr(detail["residual"], detail["abst_t1"]),
-            "n": len(detail),
+            "n_alta": len(alta),
+            "cob_alta": cob_alta,
+            "err_alta": err_alta,
+            "res_medio_alta": round(float(residual_alta.mean()), 2),
+            "cob_reverso_alta": cob_rev,
         }
     except Exception as e:
-        print(f"  residual {uf}: {e}")
+        print(f"  migracao {uf}: {e}")
         return None
 
 def main():
@@ -222,7 +217,7 @@ def main():
         return
 
     summary = []
-    residual_rows = []
+    migracao_rows = []
     for jf in join_files:
         uf = jf.stem.replace("join_", "")
         print(f"\nProcessando {uf}...")
@@ -252,97 +247,57 @@ def main():
         if len(train_clean) < 30:
             print(f"  {uf}: poucas seções válidas no treino após dropna ({len(train_clean)})")
             continue
-        print(f"  {len(all_features)} features | explorando combinações até tamanho {MAX_SUBSET_SIZE}")
 
         best_result, beating, baseline_logit = explore_combinations(
             all_features, train_clean, test_clean, col_t2
         )
         if not best_result:
-            print(f"  {uf}: nenhuma combinação válida")
             continue
         best_feats, cob_te, cob_tr, best_tree, logit_best = best_result
 
-        rf_cob_te = None
-        try:
-            X_tr_all = train_clean[all_features]
-            y_tr_all = train_clean[col_t2]
-            X_te_all = test_clean[all_features] if len(test_clean) > 0 else pd.DataFrame()
-            y_te_all = test_clean[col_t2] if len(test_clean) > 0 else pd.Series(dtype=float)
-            rf = RandomForestRegressor(
-                n_estimators=RF_N_ESTIMATORS,
-                max_depth=RF_MAX_DEPTH,
-                min_samples_leaf=MIN_SAMPLES_LEAF,
-                random_state=42,
-                n_jobs=-1
-            )
-            rf.fit(X_tr_all, y_tr_all)
-            rf_cob_te, _ = evaluate_regression(rf, X_te_all, y_te_all) if len(X_te_all) > 0 else (None, None)
-            print(f"  RF teste={rf_cob_te}%")
-        except Exception as e:
-            print(f"  erro no RF: {e}")
-            rf_cob_te = None
-
-        res_info = residual_analysis(train_clean, test_clean, all_features, col_t2, uf)
-        if res_info:
-            residual_rows.append({"uf": uf, **res_info})
-            print(f"  residual: corr_diff={res_info['corr_diff']} corr_aptos={res_info['corr_aptos']} corr_abst={res_info['corr_abst']}")
-
-        print(f"  melhor árvore={cob_te}% | logit={baseline_logit}% | RF={rf_cob_te}% | {len(beating)} subsets > logit")
+        # Análise de migração
+        mig = migracao_e_reverso(train_clean, test_clean, all_features, col_t1, col_t2, uf)
+        if mig:
+            migracao_rows.append({"uf": uf, **mig})
+            print(f"  alta migração: n={mig['n_alta']} cob={mig['cob_alta']}%")
 
         rules = ""
         if best_tree is not None:
             rules = export_text(best_tree, feature_names=list(best_feats))[:3000]
         with open(RESULTS / f"regras_mult3_{uf}.txt", "w", encoding="utf-8") as f:
-            f.write(f"Melhor árvore (combinatorial) + comparação RF — {uf}\n")
-            f.write(f"Features melhor árvore ({len(best_feats)}): {', '.join(best_feats)}\n")
-            f.write(f"Árvore teste: {cob_te}% | treino: {cob_tr}%\n")
-            f.write(f"Logit baseline: {baseline_logit}%\n")
-            f.write(f"Random Forest (todas features): {rf_cob_te}%\n")
-            f.write(f"Subsets árvore > logit: {len(beating)}\n")
+            f.write(f"Melhor árvore (combinatorial) — {uf}\n")
+            f.write(f"Árvore teste: {cob_te}% | Logit: {baseline_logit}%\n")
             f.write("="*50 + "\n")
             f.write(rules + "\n")
-            if beating:
-                f.write("\nTop subsets que superam o logit:\n")
-                for b in beating[:5]:
-                    f.write(f"  {b['n']} feats | árvore={b['arvore_teste']}% | delta={b['delta']}% | {', '.join(b['features'][:3])}...\n")
 
         summary.append({
             "uf": uf,
             "n_treino": len(train_clean),
             "n_teste": len(test_clean),
-            "n_features_best": len(best_feats),
             "arvore_teste": cob_te,
             "logit_baseline": baseline_logit,
-            "rf_teste": rf_cob_te,
-            "n_beating": len(beating),
-            "best_delta": beating[0]["delta"] if beating else None,
         })
 
     status_lines = [f"UFs processadas: {len(summary)}"]
     if summary:
         with open(RESULTS / "resumo_mult3.txt", "w", encoding="utf-8") as f:
-            f.write("Resumo: combinatorial + Random Forest no split mult3\n")
-            f.write("Dados lidos de joins pré-processados (Parquet)\n")
-            f.write("Compara árvore simples, logit e RF (não-linear)\n")
-            f.write("="*100 + "\n")
-            f.write(f"{'UF':<6} {'Treino':>8} {'Teste':>8} {'NFeat':>6} {'ArvTe%':>8} {'Logit%':>8} {'RF%':>8} {'NBeating':>9} {'BestDelta':>10}\n")
-            f.write("-"*100 + "\n")
+            f.write("Resumo mult3\n")
+            f.write(f"{'UF':<6} {'Treino':>8} {'Teste':>8} {'ArvTe%':>8} {'Logit%':>8}\n")
             for m in summary:
-                f.write(f"{m['uf']:<6} {m['n_treino']:>8} {m['n_teste']:>8} {m['n_features_best']:>6} {str(m['arvore_teste']):>8} {str(m['logit_baseline']):>8} {str(m['rf_teste']):>8} {m['n_beating']:>9} {str(m['best_delta']):>10}\n")
-        status_lines.append("resumo_mult3.txt escrito (com RF)")
+                f.write(f"{m['uf']:<6} {m['n_treino']:>8} {m['n_teste']:>8} {str(m['arvore_teste']):>8} {str(m['logit_baseline']):>8}\n")
+        status_lines.append("resumo_mult3.txt escrito")
 
-    if residual_rows:
-        with open(RESULTS / "residual_fatores.txt", "w", encoding="utf-8") as f:
-            f.write("Residual do linear vs fatores (teste)\n")
-            f.write("corr_diff = corr(residual, diff_comparecimento)\n")
-            f.write("corr_aptos = corr(residual, QT_APTOS)\n")
-            f.write("corr_abst = corr(residual, taxa_abstencao_T1)\n")
-            f.write("="*70 + "\n")
-            f.write(f"{'UF':<6} {'CorrDiff':>9} {'CorrAptos':>10} {'CorrAbst':>9} {'N':>8}\n")
-            f.write("-"*70 + "\n")
-            for r in residual_rows:
-                f.write(f"{r['uf']:<6} {str(r['corr_diff']):>9} {str(r['corr_aptos']):>10} {str(r['corr_abst']):>9} {r['n']:>8}\n")
-        status_lines.append("residual_fatores.txt + residual_secao_*.parquet + residual_zona_*.csv escritos")
+    if migracao_rows:
+        with open(RESULTS / "migracao_alta.txt", "w", encoding="utf-8") as f:
+            f.write(f"Seções com |diff_comparecimento| >= {MIGRACAO_LIMIAR_VOTOS} votos\n")
+            f.write("cob_alta = cobertura do logit normal nessas seções\n")
+            f.write("cob_reverso = cobertura do logit reverso (T2->T1) nessas seções\n")
+            f.write("="*80 + "\n")
+            f.write(f"{'UF':<6} {'NAlta':>7} {'CobAlta':>8} {'ErrAlta':>8} {'ResMed':>8} {'CobRev':>8}\n")
+            f.write("-"*80 + "\n")
+            for r in migracao_rows:
+                f.write(f"{r['uf']:<6} {r['n_alta']:>7} {str(r.get('cob_alta')):>8} {str(r.get('err_alta')):>8} {str(r.get('res_medio_alta')):>8} {str(r.get('cob_reverso_alta')):>8}\n")
+        status_lines.append("migracao_alta.txt escrito")
 
     (RESULTS / "status.txt").write_text("\n".join(status_lines) + "\n", encoding="utf-8")
     print(f"\nResultados em {RESULTS.resolve()}")
