@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Calcula residual do modelo linear (T1 -> T2) e distribuição por faixa.
-Versão enxuta: sem combinatorial, sem árvore, sem RF.
+Bins de 0.1 p.p. + agregação por região em densidade (para sobreposição).
 """
 
 from pathlib import Path
@@ -13,6 +13,15 @@ import numpy as np
 PROCESSED = Path("/home/alexa/eleicoes-data/processed")
 RESULTS = Path("resultados")
 RESULTS.mkdir(exist_ok=True)
+
+# Regiões
+REGIOES = {
+    "Norte": ["AC", "AM", "AP", "PA", "RO", "RR", "TO"],
+    "Nordeste": ["AL", "BA", "CE", "MA", "PB", "PE", "PI", "RN", "SE"],
+    "Centro-Oeste": ["DF", "GO", "MS", "MT"],
+    "Sudeste": ["ES", "MG", "RJ", "SP"],
+    "Sul": ["PR", "RS", "SC"],
+}
 
 def to_numeric_safe(s):
     return pd.to_numeric(s, errors="coerce").fillna(0)
@@ -58,7 +67,7 @@ def split_mult3(merged: pd.DataFrame):
     return train, test
 
 def residual_distribuicao(train_clean, test_clean, features, col_t2, uf):
-    """Residual do linear + distribuição por faixas de 1 p.p."""
+    """Residual do linear + distribuição por faixas de 0.1 p.p."""
     try:
         X_tr = train_clean[features]
         y_tr = train_clean[col_t2]
@@ -68,32 +77,34 @@ def residual_distribuicao(train_clean, test_clean, features, col_t2, uf):
         lin.fit(X_tr_s, y_tr)
 
         if len(test_clean) == 0:
-            return None
+            return None, None
         X_te = test_clean[features]
         y_te = test_clean[col_t2]
         pred = lin.predict(scaler.transform(X_te))
         residual = y_te - pred
+        residual = residual.dropna()
 
-        # Distribuição
-        bins = np.arange(-20, 21, 1)
-        counts, edges = np.histogram(residual.dropna(), bins=bins)
+        # Bins de 0.1 p.p.
+        bins = np.arange(-15, 15.1, 0.1)
+        counts, edges = np.histogram(residual, bins=bins)
         dist = pd.DataFrame({
-            "faixa_ini": edges[:-1],
-            "faixa_fim": edges[1:],
+            "faixa_ini": edges[:-1].round(1),
+            "faixa_fim": edges[1:].round(1),
             "n": counts,
         })
         dist = dist[dist["n"] > 0]
         dist.to_csv(RESULTS / f"residual_dist_{uf}.csv", index=False)
 
-        return {
+        info = {
             "n": len(residual),
             "res_medio": round(float(residual.mean()), 3),
             "res_std": round(float(residual.std()), 3),
             "pct_dentro_5": round(100 * (residual.abs() <= 5).mean(), 2),
         }
+        return info, dist
     except Exception as e:
         print(f"  residual {uf}: {e}")
-        return None
+        return None, None
 
 def main():
     join_files = sorted(PROCESSED.glob("join_*.parquet"))
@@ -131,19 +142,17 @@ def main():
         if len(train_clean) < 30:
             continue
 
-        info = residual_distribuicao(train_clean, test_clean, features, col_t2, uf)
-        if info:
+        info, dist = residual_distribuicao(train_clean, test_clean, features, col_t2, uf)
+        if info and dist is not None:
             rows.append({"uf": uf, **info})
-            dist_path = RESULTS / f"residual_dist_{uf}.csv"
-            if dist_path.exists():
-                d = pd.read_csv(dist_path)
-                d["uf"] = uf
-                all_dist.append(d)
+            dist = dist.copy()
+            dist["uf"] = uf
+            all_dist.append(dist)
             print(f"  n={info['n']} | dentro ±5pp={info['pct_dentro_5']}%")
 
     if rows:
         with open(RESULTS / "residual_resumo.txt", "w", encoding="utf-8") as f:
-            f.write("Residual do linear (teste)\n")
+            f.write("Residual do linear (teste) — bins 0.1 p.p.\n")
             f.write(f"{'UF':<6} {'N':>8} {'ResMed':>8} {'ResStd':>8} {'%<=5pp':>8}\n")
             f.write("-"*40 + "\n")
             for r in rows:
@@ -151,10 +160,26 @@ def main():
 
     if all_dist:
         full = pd.concat(all_dist, ignore_index=True)
+        # Nacional
         nacional = full.groupby(["faixa_ini", "faixa_fim"])["n"].sum().reset_index()
+        nacional["densidade"] = nacional["n"] / nacional["n"].sum()
         nacional.to_csv(RESULTS / "residual_dist_nacional.csv", index=False)
 
-    status = f"UFs processadas: {len(rows)}\n"
+        # Por região (densidade)
+        uf_to_regiao = {}
+        for reg, ufs in REGIOES.items():
+            for u in ufs:
+                uf_to_regiao[u] = reg
+        full["regiao"] = full["uf"].map(uf_to_regiao)
+        for reg in REGIOES.keys():
+            sub = full[full["regiao"] == reg]
+            if len(sub) == 0:
+                continue
+            agg = sub.groupby(["faixa_ini", "faixa_fim"])["n"].sum().reset_index()
+            agg["densidade"] = agg["n"] / agg["n"].sum()
+            agg.to_csv(RESULTS / f"residual_dist_regiao_{reg.replace(' ', '_')}.csv", index=False)
+
+    status = f"UFs processadas: {len(rows)}\nBins de 0.1 p.p. + regiões gerados\n"
     (RESULTS / "status.txt").write_text(status, encoding="utf-8")
     print(status)
     print(f"Resultados em {RESULTS.resolve()}")
