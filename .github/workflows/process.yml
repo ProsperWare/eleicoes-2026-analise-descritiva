@@ -9,12 +9,17 @@ on:
       - 'requirements.txt'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   process:
     runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Sync repo to /home/alexa/eleicoes-2026-analise-descritiva
         run: |
@@ -68,28 +73,14 @@ jobs:
       - name: Processar e gerar resultados
         run: python scripts/process_and_summarize.py
 
-      - name: Diagnóstico resultados
+      - name: Commit resultados
         run: |
-          echo "PWD: $(pwd)"
-          echo "--- ls resultados/ ---"
-          ls -la resultados/ || echo "pasta resultados não existe"
-          echo "--- ls /home/alexa/eleicoes-2026-analise-descritiva/resultados/ ---"
-          ls -la /home/alexa/eleicoes-2026-analise-descritiva/resultados/ || echo "não existe no DEST"
-
-      - name: Imprimir resumo mult3
-        run: |
-          echo "========== resumo_mult3.txt =========="
-          cat resultados/resumo_mult3.txt || true
-          echo ""
-
-      - name: Imprimir regras mult3 GO
-        run: |
-          echo "========== regras_mult3_GO.txt =========="
-          cat resultados/regras_mult3_GO.txt || true
-          echo ""
-
-      - name: Imprimir regras mult3 MG
-        run: |
-          echo "========== regras_mult3_MG.txt =========="
-          cat resultados/regras_mult3_MG.txt || true
-          echo ""
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add resultados/
+          if git diff --staged --quiet; then
+            echo "Nada para commitar em resultados/"
+          else
+            git commit -m "Atualiza resultados [skip ci]"
+            git push
+          fi
