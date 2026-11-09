@@ -48,8 +48,23 @@ jobs:
           pip install -r requirements.txt
           echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
 
-      - name: Download BUs (todas as UFs)
-        run: python scripts/download_bu.py --all
+      - name: Preparar base persistente de BUs
+        run: |
+          SHARED="/home/alexa/eleicoes-data/raw"
+          mkdir -p "$SHARED"
+          # Se a pasta data/raw do workspace não existir ou estiver vazia, usa a compartilhada
+          if [ ! -d data/raw ] || [ -z "$(ls -A data/raw 2>/dev/null)" ]; then
+            mkdir -p data
+            ln -sfn "$SHARED" data/raw
+            echo "Usando base persistente: $SHARED"
+          else
+            echo "data/raw já tem conteúdo, mantendo"
+          fi
+
+      - name: Download BUs (só o que falta)
+        run: |
+          # O script download_bu.py deve pular arquivos que já existem
+          python scripts/download_bu.py --all
         continue-on-error: true
 
       - name: Processar e gerar resultados
