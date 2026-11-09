@@ -3,13 +3,14 @@
 Exploração combinatorial + Random Forest no split mult3.
 Lê dados já pré-processados (joins T1×T2 por UF) de /home/alexa/eleicoes-data/processed/.
 Compara árvore simples, logit e Random Forest nos dados oficiais do TSE.
+Inclui residual do logit vs novos votantes.
 """
 
 from pathlib import Path
 import pandas as pd
 from sklearn.tree import DecisionTreeRegressor, export_text
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
 import numpy as np
@@ -33,7 +34,6 @@ def to_numeric_safe(s):
 def find_best_candidate_match(merged: pd.DataFrame) -> tuple:
     pct_t1 = [c for c in merged.columns if c.startswith("PCT_") and c.endswith("_t1")]
     pct_t2 = [c for c in merged.columns if c.startswith("PCT_") and c.endswith("_t2")]
-    # fallback se sufixos não existirem
     if not pct_t1:
         pct_t1 = [c for c in merged.columns if c.startswith("PCT_") and not c.endswith("_t2") and "T2_" not in c]
     if not pct_t2:
@@ -147,6 +147,45 @@ def explore_combinations(all_features, train_clean, test_clean, col_t2):
     beating_logit.sort(key=lambda x: x["delta"], reverse=True)
     return best_result, beating_logit[:10], baseline_logit
 
+def residual_vs_novos(train_clean, test_clean, features, col_t2, uf):
+    """Residual do linear (proxy do logit contínuo) vs diff_comparecimento."""
+    if "diff_comparecimento" not in features and "diff_comparecimento" not in train_clean.columns:
+        return None
+    try:
+        X_tr = train_clean[features]
+        y_tr = train_clean[col_t2]
+        scaler = StandardScaler()
+        X_tr_s = scaler.fit_transform(X_tr)
+        lin = LinearRegression()
+        lin.fit(X_tr_s, y_tr)
+        # residual no teste
+        if len(test_clean) == 0:
+            return None
+        X_te = test_clean[features]
+        y_te = test_clean[col_t2]
+        X_te_s = scaler.transform(X_te)
+        pred = lin.predict(X_te_s)
+        residual = y_te - pred
+        diff = test_clean["diff_comparecimento"] if "diff_comparecimento" in test_clean.columns else None
+        if diff is None:
+            return None
+        valid = pd.DataFrame({"residual": residual, "diff_comp": diff}).dropna()
+        if len(valid) < 10:
+            return None
+        corr = valid["residual"].corr(valid["diff_comp"])
+        # residual médio quando há aumento vs queda de comparecimento
+        aumento = valid[valid["diff_comp"] > 0]["residual"].mean() if (valid["diff_comp"] > 0).any() else None
+        queda = valid[valid["diff_comp"] < 0]["residual"].mean() if (valid["diff_comp"] < 0).any() else None
+        return {
+            "corr_residual_diff": round(corr, 3) if pd.notna(corr) else None,
+            "res_medio_aumento": round(aumento, 2) if aumento is not None and pd.notna(aumento) else None,
+            "res_medio_queda": round(queda, 2) if queda is not None and pd.notna(queda) else None,
+            "n": len(valid),
+        }
+    except Exception as e:
+        print(f"  residual {uf}: {e}")
+        return None
+
 def main():
     join_files = sorted(PROCESSED.glob("join_*.parquet"))
     print(f"Joins pré-processados encontrados: {len(join_files)}")
@@ -156,6 +195,7 @@ def main():
         return
 
     summary = []
+    residual_rows = []
     for jf in join_files:
         uf = jf.stem.replace("join_", "")
         print(f"\nProcessando {uf}...")
@@ -171,9 +211,6 @@ def main():
         col_t1, col_t2 = find_best_candidate_match(merged)
         if not col_t1:
             print(f"  {uf}: nenhum match de candidato")
-            # debug: mostra colunas PCT
-            pct_cols = [c for c in merged.columns if c.startswith("PCT_")]
-            print(f"    colunas PCT encontradas: {pct_cols[:10]}")
             continue
         print(f"  alvo = {col_t2}")
 
@@ -198,7 +235,6 @@ def main():
             continue
         best_feats, cob_te, cob_tr, best_tree, logit_best = best_result
 
-        # Random Forest com todas as features
         rf_cob_te = None
         try:
             X_tr_all = train_clean[all_features]
@@ -218,6 +254,12 @@ def main():
         except Exception as e:
             print(f"  erro no RF: {e}")
             rf_cob_te = None
+
+        # Residual vs novos votantes
+        res_info = residual_vs_novos(train_clean, test_clean, all_features, col_t2, uf)
+        if res_info:
+            residual_rows.append({"uf": uf, **res_info})
+            print(f"  residual vs diff_comp: corr={res_info['corr_residual_diff']}")
 
         print(f"  melhor árvore={cob_te}% | logit={baseline_logit}% | RF={rf_cob_te}% | {len(beating)} subsets > logit")
 
@@ -262,8 +304,17 @@ def main():
             for m in summary:
                 f.write(f"{m['uf']:<6} {m['n_treino']:>8} {m['n_teste']:>8} {m['n_features_best']:>6} {str(m['arvore_teste']):>8} {str(m['logit_baseline']):>8} {str(m['rf_teste']):>8} {m['n_beating']:>9} {str(m['best_delta']):>10}\n")
         status_lines.append("resumo_mult3.txt escrito (com RF)")
-    else:
-        status_lines.append("Nenhuma UF gerou resumo")
+
+    if residual_rows:
+        with open(RESULTS / "residual_vs_novos.txt", "w", encoding="utf-8") as f:
+            f.write("Residual do linear (proxy logit contínuo) vs diff_comparecimento (teste)\n")
+            f.write("="*70 + "\n")
+            f.write(f"{'UF':<6} {'Corr':>8} {'ResAum':>8} {'ResQueda':>10} {'N':>8}\n")
+            f.write("-"*70 + "\n")
+            for r in residual_rows:
+                f.write(f"{r['uf']:<6} {str(r['corr_residual_diff']):>8} {str(r['res_medio_aumento']):>8} {str(r['res_medio_queda']):>10} {r['n']:>8}\n")
+        status_lines.append("residual_vs_novos.txt escrito")
+
     (RESULTS / "status.txt").write_text("\n".join(status_lines) + "\n", encoding="utf-8")
     print(f"\nResultados em {RESULTS.resolve()}")
     print("\n".join(status_lines))
