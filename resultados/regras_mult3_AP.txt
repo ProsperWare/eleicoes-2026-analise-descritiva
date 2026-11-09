@@ -1,9 +1,5 @@
-Melhor árvore (combinatorial) + comparação RF — AP
-Features melhor árvore (1): PCT_PRES_LULA_t1
-Árvore teste: 91.59% | treino: 91.36%
-Logit baseline: 87.54%
-Random Forest (todas features): 92.96%
-Subsets árvore > logit: 10
+Melhor árvore (combinatorial) — AP
+Árvore teste: 91.59% | Logit: 87.54%
 ==================================================
 |--- PCT_PRES_LULA_t1 <= 52.57
 |   |--- PCT_PRES_LULA_t1 <= 40.82
@@ -43,10 +39,3 @@ Subsets árvore > logit: 10
 |   |--- PCT_PRES_LULA_t1 >  69.86
 |   |   |--- value: [88.04]
 
-
-Top subsets que superam o logit:
-  1 feats | árvore=91.59% | delta=4.05% | PCT_PRES_LULA_t1...
-  2 feats | árvore=91.59% | delta=4.05% | PCT_PRES_LULA_t1, PCT_GOV_DR__FURLAN_t1...
-  2 feats | árvore=91.59% | delta=4.05% | PCT_PRES_LULA_t1, PCT_GOV_CLÉCIO_t1...
-  2 feats | árvore=91.59% | delta=4.05% | PCT_PRES_LULA_t1, PCT_SEN_RAYSSA_FURLAN_t1...
-  2 feats | árvore=91.59% | delta=4.05% | PCT_PRES_LULA_t1, PCT_SEN_LUCAS_BARRETO_t1...

@@ -1,9 +1,5 @@
-Melhor árvore (combinatorial) + comparação RF — DF
-Features melhor árvore (3): PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_ESQ_PRES_t1, PCT_DEP_RAFAEL_PRUDENTE_t1
-Árvore teste: 96.96% | treino: 97.58%
-Logit baseline: 90.6%
-Random Forest (todas features): 98.34%
-Subsets árvore > logit: 10
+Melhor árvore (combinatorial) — DF
+Árvore teste: 96.96% | Logit: 90.6%
 ==================================================
 |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 48.85
 |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 41.43
@@ -52,10 +48,3 @@ Subsets árvore > logit: 10
 |   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  61.43
 |   |   |   |   |--- value: [66.18]
 
-
-Top subsets que superam o logit:
-  3 feats | árvore=96.96% | delta=6.36% | PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_ESQ_PRES_t1, PCT_DEP_RAFAEL_PRUDENTE_t1...
-  3 feats | árvore=96.96% | delta=6.36% | PCT_DIR_PRES_t1, PCT_ESQ_PRES_t1, PCT_DEP_RAFAEL_PRUDENTE_t1...
-  4 feats | árvore=96.96% | delta=6.36% | PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_PRES_RONALDO_CAIADO_t1, PCT_ESQ_PRES_t1...
-  4 feats | árvore=96.96% | delta=6.36% | PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_DIR_PRES_t1, PCT_ESQ_PRES_t1...
-  4 feats | árvore=96.96% | delta=6.36% | PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_ESQ_PRES_t1, PCT_GOV_CELINA_LEÃO_t1...

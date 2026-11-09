@@ -1,9 +1,5 @@
-Melhor árvore (combinatorial) + comparação RF — RR
-Features melhor árvore (2): PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_ESQ_PRES_t1
-Árvore teste: 92.75% | treino: 92.93%
-Logit baseline: 99.58%
-Random Forest (todas features): 93.28%
-Subsets árvore > logit: 0
+Melhor árvore (combinatorial) — RR
+Árvore teste: 92.75% | Logit: 99.58%
 ==================================================
 |--- PCT_ESQ_PRES_t1 <= 37.24
 |   |--- PCT_ESQ_PRES_t1 <= 20.51

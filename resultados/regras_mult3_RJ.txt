@@ -1,9 +1,5 @@
-Melhor árvore (combinatorial) + comparação RF — RJ
-Features melhor árvore (1): PCT_PRES_FLAVIO_BOLSONARO_t1
-Árvore teste: 96.11% | treino: 96.31%
-Logit baseline: 93.02%
-Random Forest (todas features): 98.33%
-Subsets árvore > logit: 10
+Melhor árvore (combinatorial) — RJ
+Árvore teste: 96.11% | Logit: 93.02%
 ==================================================
 |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 48.73
 |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 40.33
@@ -52,10 +48,3 @@ Subsets árvore > logit: 10
 |   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  68.68
 |   |   |   |   |--- value: [72.03]
 
-
-Top subsets que superam o logit:
-  1 feats | árvore=96.11% | delta=3.09% | PCT_PRES_FLAVIO_BOLSONARO_t1...
-  1 feats | árvore=96.11% | delta=3.09% | PCT_DIR_PRES_t1...
-  2 feats | árvore=96.11% | delta=3.09% | PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_PRES_LULA_t1...
-  2 feats | árvore=96.11% | delta=3.09% | PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_PRES_Nulo_t1...
-  2 feats | árvore=96.11% | delta=3.09% | PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_DIR_PRES_t1...

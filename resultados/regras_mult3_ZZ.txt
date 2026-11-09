@@ -1,9 +1,5 @@
-Melhor árvore (combinatorial) + comparação RF — ZZ
-Features melhor árvore (4): PCT_PRES_LULA_t1, PCT_PRES_ESCRITOR_AUGUSTO_CURY_t1, PCT_ESQ_PRES_t1, QT_COMPARECIMENTO_t1
-Árvore teste: 87.65% | treino: 93.26%
-Logit baseline: 95.44%
-Random Forest (todas features): 91.13%
-Subsets árvore > logit: 0
+Melhor árvore (combinatorial) — ZZ
+Árvore teste: 87.65% | Logit: 95.44%
 ==================================================
 |--- PCT_PRES_LULA_t1 <= 36.42
 |   |--- PCT_PRES_LULA_t1 <= 20.48
