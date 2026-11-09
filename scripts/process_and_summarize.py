@@ -3,7 +3,7 @@
 Exploração combinatorial + Random Forest no split mult3.
 Lê dados já pré-processados (joins T1×T2 por UF) de /home/alexa/eleicoes-data/processed/.
 Compara árvore simples, logit e Random Forest nos dados oficiais do TSE.
-Inclui residual do logit vs novos votantes.
+Inclui residual do logit vs novos votantes (por seção e resumo por zona).
 """
 
 from pathlib import Path
@@ -148,8 +148,10 @@ def explore_combinations(all_features, train_clean, test_clean, col_t2):
     return best_result, beating_logit[:10], baseline_logit
 
 def residual_vs_novos(train_clean, test_clean, features, col_t2, uf):
-    """Residual do linear (proxy do logit contínuo) vs diff_comparecimento."""
-    if "diff_comparecimento" not in features and "diff_comparecimento" not in train_clean.columns:
+    """Residual do linear (proxy do logit contínuo) vs diff_comparecimento.
+    Retorna resumo e salva detalhe por seção + resumo por zona.
+    """
+    if "diff_comparecimento" not in test_clean.columns:
         return None
     try:
         X_tr = train_clean[features]
@@ -158,7 +160,6 @@ def residual_vs_novos(train_clean, test_clean, features, col_t2, uf):
         X_tr_s = scaler.fit_transform(X_tr)
         lin = LinearRegression()
         lin.fit(X_tr_s, y_tr)
-        # residual no teste
         if len(test_clean) == 0:
             return None
         X_te = test_clean[features]
@@ -166,21 +167,43 @@ def residual_vs_novos(train_clean, test_clean, features, col_t2, uf):
         X_te_s = scaler.transform(X_te)
         pred = lin.predict(X_te_s)
         residual = y_te - pred
-        diff = test_clean["diff_comparecimento"] if "diff_comparecimento" in test_clean.columns else None
-        if diff is None:
+
+        detail = test_clean.copy()
+        detail["residual"] = residual.values
+        detail["diff_comp"] = detail["diff_comparecimento"]
+        # colunas de identificação
+        id_cols = [c for c in ["SG_UF", "CD_MUNICIPIO", "NR_ZONA", "NR_SECAO"] if c in detail.columns]
+        keep = id_cols + ["residual", "diff_comp", col_t2]
+        detail = detail[keep].dropna(subset=["residual", "diff_comp"])
+        if len(detail) < 10:
             return None
-        valid = pd.DataFrame({"residual": residual, "diff_comp": diff}).dropna()
-        if len(valid) < 10:
-            return None
-        corr = valid["residual"].corr(valid["diff_comp"])
-        # residual médio quando há aumento vs queda de comparecimento
-        aumento = valid[valid["diff_comp"] > 0]["residual"].mean() if (valid["diff_comp"] > 0).any() else None
-        queda = valid[valid["diff_comp"] < 0]["residual"].mean() if (valid["diff_comp"] < 0).any() else None
+
+        # salva detalhe por seção (limitado se for muito grande)
+        out_sec = RESULTS / f"residual_secao_{uf}.parquet"
+        detail.to_parquet(out_sec, index=False)
+
+        # resumo por zona
+        if "NR_ZONA" in detail.columns:
+            zona = detail.groupby("NR_ZONA").agg(
+                n=("residual", "count"),
+                res_medio=("residual", "mean"),
+                res_mediano=("residual", "median"),
+                diff_medio=("diff_comp", "mean"),
+                corr=("residual", lambda s: s.corr(detail.loc[s.index, "diff_comp"]) if len(s) > 5 else None),
+            ).reset_index()
+            zona["res_medio"] = zona["res_medio"].round(2)
+            zona["res_mediano"] = zona["res_mediano"].round(2)
+            zona["diff_medio"] = zona["diff_medio"].round(2)
+            zona.to_csv(RESULTS / f"residual_zona_{uf}.csv", index=False)
+
+        corr = detail["residual"].corr(detail["diff_comp"])
+        aumento = detail[detail["diff_comp"] > 0]["residual"].mean() if (detail["diff_comp"] > 0).any() else None
+        queda = detail[detail["diff_comp"] < 0]["residual"].mean() if (detail["diff_comp"] < 0).any() else None
         return {
             "corr_residual_diff": round(corr, 3) if pd.notna(corr) else None,
             "res_medio_aumento": round(aumento, 2) if aumento is not None and pd.notna(aumento) else None,
             "res_medio_queda": round(queda, 2) if queda is not None and pd.notna(queda) else None,
-            "n": len(valid),
+            "n": len(detail),
         }
     except Exception as e:
         print(f"  residual {uf}: {e}")
@@ -255,7 +278,6 @@ def main():
             print(f"  erro no RF: {e}")
             rf_cob_te = None
 
-        # Residual vs novos votantes
         res_info = residual_vs_novos(train_clean, test_clean, all_features, col_t2, uf)
         if res_info:
             residual_rows.append({"uf": uf, **res_info})
@@ -308,12 +330,13 @@ def main():
     if residual_rows:
         with open(RESULTS / "residual_vs_novos.txt", "w", encoding="utf-8") as f:
             f.write("Residual do linear (proxy logit contínuo) vs diff_comparecimento (teste)\n")
+            f.write("Detalhe por seção em residual_secao_UF.parquet | resumo por zona em residual_zona_UF.csv\n")
             f.write("="*70 + "\n")
             f.write(f"{'UF':<6} {'Corr':>8} {'ResAum':>8} {'ResQueda':>10} {'N':>8}\n")
             f.write("-"*70 + "\n")
             for r in residual_rows:
                 f.write(f"{r['uf']:<6} {str(r['corr_residual_diff']):>8} {str(r['res_medio_aumento']):>8} {str(r['res_medio_queda']):>10} {r['n']:>8}\n")
-        status_lines.append("residual_vs_novos.txt escrito")
+        status_lines.append("residual_vs_novos.txt + residual_secao_*.parquet + residual_zona_*.csv escritos")
 
     (RESULTS / "status.txt").write_text("\n".join(status_lines) + "\n", encoding="utf-8")
     print(f"\nResultados em {RESULTS.resolve()}")
