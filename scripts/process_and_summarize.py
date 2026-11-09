@@ -115,7 +115,7 @@ def split_mult3(merged: pd.DataFrame):
     return train, test
 
 def evaluate_regression(model, X, y):
-    if len(X) == 0:
+    if len(X) == 0 or len(y) == 0:
         return None, None
     pred = model.predict(X)
     pred = np.clip(pred, 0, 100)
@@ -165,10 +165,16 @@ def main():
         if train is None or len(train) < 30:
             continue
         features = get_features(merged)
-        X_train = train[features].dropna()
-        y_train = train.loc[X_train.index, col_t2]
-        X_test = test[features].dropna()
-        y_test = test.loc[X_test.index, col_t2]
+        # Remove NaN no alvo e nas features
+        train_clean = train.dropna(subset=[col_t2] + features)
+        test_clean = test.dropna(subset=[col_t2] + features)
+        if len(train_clean) < 30:
+            print(f"  {uf}: poucas seções válidas no treino após dropna")
+            continue
+        X_train = train_clean[features]
+        y_train = train_clean[col_t2]
+        X_test = test_clean[features]
+        y_test = test_clean[col_t2]
         # Árvore
         tree = DecisionTreeRegressor(max_depth=MAX_DEPTH, random_state=42, min_samples_leaf=15)
         tree.fit(X_train, y_train)
@@ -178,15 +184,15 @@ def main():
         # Linear
         scaler = StandardScaler()
         X_train_s = scaler.fit_transform(X_train)
-        X_test_s = scaler.transform(X_test)
+        X_test_s = scaler.transform(X_test) if len(X_test) > 0 else X_test
         lin = LinearRegression()
         lin.fit(X_train_s, y_train)
         cob_lin_tr, err_lin_tr = evaluate_regression(lin, X_train_s, y_train)
-        cob_lin_te, err_lin_te = evaluate_regression(lin, X_test_s, y_test)
+        cob_lin_te, err_lin_te = evaluate_regression(lin, X_test_s, y_test) if len(X_test) > 0 else (None, None)
         # Logit binário
         y_bin_train = (y_train >= BINARY_THRESHOLD).astype(int)
         logit_acc = None
-        if y_bin_train.nunique() >= 2:
+        if y_bin_train.nunique() >= 2 and len(X_test) > 0:
             try:
                 logit = LogisticRegression(max_iter=1000, random_state=42)
                 logit.fit(X_train_s, y_bin_train)
@@ -202,8 +208,8 @@ def main():
             f.write(rules + "\n")
         summary.append({
             "uf": uf,
-            "n_treino": len(train),
-            "n_teste": len(test),
+            "n_treino": len(train_clean),
+            "n_teste": len(test_clean),
             "arvore_treino": cob_tree_tr,
             "arvore_teste": cob_tree_te,
             "linear_treino": cob_lin_tr,
