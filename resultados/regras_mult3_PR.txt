@@ -1,0 +1,54 @@
+Melhor árvore (combinatorial) + comparação RF — PR
+Features melhor árvore (2): PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_PRES_LULA_t1
+Árvore teste: 94.92% | treino: 95.87%
+Logit baseline: 97.15%
+Random Forest (todas features): 98.46%
+Subsets árvore > logit: 0
+==================================================
+|--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 56.12
+|   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 46.44
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 37.20
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 30.50
+|   |   |   |   |--- value: [25.85]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  30.50
+|   |   |   |   |--- value: [36.71]
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  37.20
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 41.85
+|   |   |   |   |--- value: [42.06]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  41.85
+|   |   |   |   |--- value: [46.94]
+|   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  46.44
+|   |   |--- PCT_PRES_LULA_t1 <= 36.16
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 52.53
+|   |   |   |   |--- value: [55.18]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  52.53
+|   |   |   |   |--- value: [58.39]
+|   |   |--- PCT_PRES_LULA_t1 >  36.16
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 50.40
+|   |   |   |   |--- value: [50.50]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  50.40
+|   |   |   |   |--- value: [53.96]
+|--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  56.12
+|   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 64.85
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 60.10
+|   |   |   |--- PCT_PRES_LULA_t1 <= 29.13
+|   |   |   |   |--- value: [62.84]
+|   |   |   |--- PCT_PRES_LULA_t1 >  29.13
+|   |   |   |   |--- value: [60.15]
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  60.10
+|   |   |   |--- PCT_PRES_LULA_t1 <= 25.98
+|   |   |   |   |--- value: [66.85]
+|   |   |   |--- PCT_PRES_LULA_t1 >  25.98
+|   |   |   |   |--- value: [63.90]
+|   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  64.85
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 71.64
+|   |   |   |--- PCT_PRES_LULA_t1 <= 23.15
+|   |   |   |   |--- value: [71.63]
+|   |   |   |--- PCT_PRES_LULA_t1 >  23.15
+|   |   |   |   |--- value: [68.09]
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  71.64
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 78.49
+|   |   |   |   |--- value: [76.78]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  78.49
+|   |   |   |   |--- value: [84.31]
+

@@ -1,0 +1,51 @@
+Melhor árvore (combinatorial) + comparação RF — ZZ
+Features melhor árvore (4): PCT_PRES_LULA_t1, PCT_PRES_ESCRITOR_AUGUSTO_CURY_t1, PCT_ESQ_PRES_t1, QT_COMPARECIMENTO_t1
+Árvore teste: 87.65% | treino: 93.26%
+Logit baseline: 95.44%
+Random Forest (todas features): 91.13%
+Subsets árvore > logit: 0
+==================================================
+|--- PCT_PRES_LULA_t1 <= 36.42
+|   |--- PCT_PRES_LULA_t1 <= 20.48
+|   |   |--- PCT_PRES_LULA_t1 <= 14.33
+|   |   |   |--- PCT_PRES_LULA_t1 <= 11.19
+|   |   |   |   |--- value: [12.39]
+|   |   |   |--- PCT_PRES_LULA_t1 >  11.19
+|   |   |   |   |--- value: [16.66]
+|   |   |--- PCT_PRES_LULA_t1 >  14.33
+|   |   |   |--- PCT_PRES_LULA_t1 <= 16.40
+|   |   |   |   |--- value: [19.93]
+|   |   |   |--- PCT_PRES_LULA_t1 >  16.40
+|   |   |   |   |--- value: [22.72]
+|   |--- PCT_PRES_LULA_t1 >  20.48
+|   |   |--- PCT_PRES_LULA_t1 <= 28.67
+|   |   |   |--- PCT_PRES_LULA_t1 <= 23.81
+|   |   |   |   |--- value: [27.67]
+|   |   |   |--- PCT_PRES_LULA_t1 >  23.81
+|   |   |   |   |--- value: [31.81]
+|   |   |--- PCT_PRES_LULA_t1 >  28.67
+|   |   |   |--- value: [39.74]
+|--- PCT_PRES_LULA_t1 >  36.42
+|   |--- PCT_PRES_LULA_t1 <= 58.83
+|   |   |--- PCT_ESQ_PRES_t1 <= 50.45
+|   |   |   |--- PCT_ESQ_PRES_t1 <= 43.22
+|   |   |   |   |--- value: [46.53]
+|   |   |   |--- PCT_ESQ_PRES_t1 >  43.22
+|   |   |   |   |--- value: [53.62]
+|   |   |--- PCT_ESQ_PRES_t1 >  50.45
+|   |   |   |--- PCT_ESQ_PRES_t1 <= 53.77
+|   |   |   |   |--- value: [57.43]
+|   |   |   |--- PCT_ESQ_PRES_t1 >  53.77
+|   |   |   |   |--- value: [62.66]
+|   |--- PCT_PRES_LULA_t1 >  58.83
+|   |   |--- PCT_PRES_LULA_t1 <= 70.98
+|   |   |   |--- PCT_ESQ_PRES_t1 <= 64.49
+|   |   |   |   |--- value: [67.62]
+|   |   |   |--- PCT_ESQ_PRES_t1 >  64.49
+|   |   |   |   |--- value: [73.25]
+|   |   |--- PCT_PRES_LULA_t1 >  70.98
+|   |   |   |--- PCT_PRES_LULA_t1 <= 76.42
+|   |   |   |   |--- value: [80.13]
+|   |   |   |--- PCT_PRES_LULA_t1 >  76.42
+|   |   |   |   |--- value: [86.31]
+

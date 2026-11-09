@@ -1,0 +1,48 @@
+Melhor árvore (combinatorial) + comparação RF — AC
+Features melhor árvore (3): PCT_PRES_LULA_t1, PCT_DIR_PRES_t1, PCT_ESQ_PRES_t1
+Árvore teste: 90.24% | treino: 93.84%
+Logit baseline: 98.82%
+Random Forest (todas features): 91.7%
+Subsets árvore > logit: 0
+==================================================
+|--- PCT_DIR_PRES_t1 <= 60.89
+|   |--- PCT_ESQ_PRES_t1 <= 41.24
+|   |   |--- PCT_ESQ_PRES_t1 <= 31.35
+|   |   |   |--- PCT_ESQ_PRES_t1 <= 28.54
+|   |   |   |   |--- value: [32.98]
+|   |   |   |--- PCT_ESQ_PRES_t1 >  28.54
+|   |   |   |   |--- value: [35.30]
+|   |   |--- PCT_ESQ_PRES_t1 >  31.35
+|   |   |   |--- PCT_ESQ_PRES_t1 <= 34.73
+|   |   |   |   |--- value: [37.04]
+|   |   |   |--- PCT_ESQ_PRES_t1 >  34.73
+|   |   |   |   |--- value: [40.40]
+|   |--- PCT_ESQ_PRES_t1 >  41.24
+|   |   |--- PCT_ESQ_PRES_t1 <= 47.57
+|   |   |   |--- value: [46.95]
+|   |   |--- PCT_ESQ_PRES_t1 >  47.57
+|   |   |   |--- value: [58.37]
+|--- PCT_DIR_PRES_t1 >  60.89
+|   |--- PCT_DIR_PRES_t1 <= 67.54
+|   |   |--- PCT_PRES_LULA_t1 <= 25.59
+|   |   |   |--- PCT_PRES_LULA_t1 <= 22.92
+|   |   |   |   |--- value: [27.19]
+|   |   |   |--- PCT_PRES_LULA_t1 >  22.92
+|   |   |   |   |--- value: [29.08]
+|   |   |--- PCT_PRES_LULA_t1 >  25.59
+|   |   |   |--- PCT_ESQ_PRES_t1 <= 28.75
+|   |   |   |   |--- value: [30.60]
+|   |   |   |--- PCT_ESQ_PRES_t1 >  28.75
+|   |   |   |   |--- value: [32.96]
+|   |--- PCT_DIR_PRES_t1 >  67.54
+|   |   |--- PCT_DIR_PRES_t1 <= 74.19
+|   |   |   |--- PCT_ESQ_PRES_t1 <= 20.57
+|   |   |   |   |--- value: [22.95]
+|   |   |   |--- PCT_ESQ_PRES_t1 >  20.57
+|   |   |   |   |--- value: [25.53]
+|   |   |--- PCT_DIR_PRES_t1 >  74.19
+|   |   |   |--- PCT_ESQ_PRES_t1 <= 15.35
+|   |   |   |   |--- value: [14.50]
+|   |   |   |--- PCT_ESQ_PRES_t1 >  15.35
+|   |   |   |   |--- value: [19.90]
+

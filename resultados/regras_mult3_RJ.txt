@@ -1,0 +1,61 @@
+Melhor árvore (combinatorial) + comparação RF — RJ
+Features melhor árvore (1): PCT_PRES_FLAVIO_BOLSONARO_t1
+Árvore teste: 96.11% | treino: 96.31%
+Logit baseline: 93.02%
+Random Forest (todas features): 98.33%
+Subsets árvore > logit: 10
+==================================================
+|--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 48.73
+|   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 40.33
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 33.22
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 29.58
+|   |   |   |   |--- value: [28.09]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  29.58
+|   |   |   |   |--- value: [33.04]
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  33.22
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 36.59
+|   |   |   |   |--- value: [36.60]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  36.59
+|   |   |   |   |--- value: [39.83]
+|   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  40.33
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 44.05
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 42.37
+|   |   |   |   |--- value: [42.66]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  42.37
+|   |   |   |   |--- value: [44.41]
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  44.05
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 46.75
+|   |   |   |   |--- value: [46.73]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  46.75
+|   |   |   |   |--- value: [48.97]
+|--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  48.73
+|   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 57.49
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 52.97
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 51.13
+|   |   |   |   |--- value: [50.93]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  51.13
+|   |   |   |   |--- value: [53.09]
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  52.97
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 55.18
+|   |   |   |   |--- value: [55.00]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  55.18
+|   |   |   |   |--- value: [57.13]
+|   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  57.49
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 63.24
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 60.44
+|   |   |   |   |--- value: [59.39]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  60.44
+|   |   |   |   |--- value: [62.18]
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  63.24
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 68.68
+|   |   |   |   |--- value: [65.64]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  68.68
+|   |   |   |   |--- value: [72.03]
+
+
+Top subsets que superam o logit:
+  1 feats | árvore=96.11% | delta=3.09% | PCT_PRES_FLAVIO_BOLSONARO_t1...
+  1 feats | árvore=96.11% | delta=3.09% | PCT_DIR_PRES_t1...
+  2 feats | árvore=96.11% | delta=3.09% | PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_PRES_LULA_t1...
+  2 feats | árvore=96.11% | delta=3.09% | PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_PRES_Nulo_t1...
+  2 feats | árvore=96.11% | delta=3.09% | PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_DIR_PRES_t1...

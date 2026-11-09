@@ -1,0 +1,33 @@
+Melhor árvore (combinatorial) + comparação RF — RR
+Features melhor árvore (2): PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_ESQ_PRES_t1
+Árvore teste: 92.75% | treino: 92.93%
+Logit baseline: 99.58%
+Random Forest (todas features): 93.28%
+Subsets árvore > logit: 0
+==================================================
+|--- PCT_ESQ_PRES_t1 <= 37.24
+|   |--- PCT_ESQ_PRES_t1 <= 20.51
+|   |   |--- PCT_ESQ_PRES_t1 <= 16.24
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 80.74
+|   |   |   |   |--- value: [19.01]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  80.74
+|   |   |   |   |--- value: [14.44]
+|   |   |--- PCT_ESQ_PRES_t1 >  16.24
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 72.96
+|   |   |   |   |--- value: [24.33]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  72.96
+|   |   |   |   |--- value: [21.93]
+|   |--- PCT_ESQ_PRES_t1 >  20.51
+|   |   |--- PCT_ESQ_PRES_t1 <= 25.37
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 69.75
+|   |   |   |   |--- value: [28.24]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  69.75
+|   |   |   |   |--- value: [25.74]
+|   |   |--- PCT_ESQ_PRES_t1 >  25.37
+|   |   |   |--- PCT_ESQ_PRES_t1 <= 28.38
+|   |   |   |   |--- value: [32.21]
+|   |   |   |--- PCT_ESQ_PRES_t1 >  28.38
+|   |   |   |   |--- value: [36.72]
+|--- PCT_ESQ_PRES_t1 >  37.24
+|   |--- value: [61.00]
+

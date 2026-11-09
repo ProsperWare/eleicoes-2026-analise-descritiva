@@ -1,0 +1,51 @@
+Melhor árvore (combinatorial) + comparação RF — MS
+Features melhor árvore (3): PCT_PRES_FLAVIO_BOLSONARO_t1, PCT_PRES_LULA_t1, PCT_ESQ_PRES_t1
+Árvore teste: 93.11% | treino: 95.38%
+Logit baseline: 95.25%
+Random Forest (todas features): 95.88%
+Subsets árvore > logit: 0
+==================================================
+|--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 56.65
+|   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 45.87
+|   |   |--- PCT_PRES_LULA_t1 <= 64.00
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 39.34
+|   |   |   |   |--- value: [37.44]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  39.34
+|   |   |   |   |--- value: [45.07]
+|   |   |--- PCT_PRES_LULA_t1 >  64.00
+|   |   |   |--- value: [15.32]
+|   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  45.87
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 51.21
+|   |   |   |--- PCT_ESQ_PRES_t1 <= 39.05
+|   |   |   |   |--- value: [52.31]
+|   |   |   |--- PCT_ESQ_PRES_t1 >  39.05
+|   |   |   |   |--- value: [49.84]
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  51.21
+|   |   |   |--- PCT_PRES_LULA_t1 <= 36.93
+|   |   |   |   |--- value: [56.84]
+|   |   |   |--- PCT_PRES_LULA_t1 >  36.93
+|   |   |   |   |--- value: [53.44]
+|--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  56.65
+|   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 65.29
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 60.74
+|   |   |   |--- PCT_PRES_LULA_t1 <= 31.22
+|   |   |   |   |--- value: [61.74]
+|   |   |   |--- PCT_PRES_LULA_t1 >  31.22
+|   |   |   |   |--- value: [59.16]
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  60.74
+|   |   |   |--- PCT_PRES_LULA_t1 <= 27.03
+|   |   |   |   |--- value: [66.20]
+|   |   |   |--- PCT_PRES_LULA_t1 >  27.03
+|   |   |   |   |--- value: [63.42]
+|   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  65.29
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 71.37
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 <= 67.59
+|   |   |   |   |--- value: [68.10]
+|   |   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  67.59
+|   |   |   |   |--- value: [70.85]
+|   |   |--- PCT_PRES_FLAVIO_BOLSONARO_t1 >  71.37
+|   |   |   |--- PCT_PRES_LULA_t1 <= 16.68
+|   |   |   |   |--- value: [79.67]
+|   |   |   |--- PCT_PRES_LULA_t1 >  16.68
+|   |   |   |   |--- value: [75.03]
+
