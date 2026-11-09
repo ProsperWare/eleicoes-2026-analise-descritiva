@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Exploração combinatorial + Random Forest no split mult3.
-Inclui análise de seções com alta variação de comparecimento e logit reverso.
+Inclui análise de seções com alta variação de comparecimento, logit reverso
+e perfil de seções com |residual| > 5 p.p.
 """
 
 from pathlib import Path
@@ -25,7 +26,8 @@ MIN_SAMPLES_LEAF = 15
 MAX_SUBSET_SIZE = 5
 RF_N_ESTIMATORS = 100
 RF_MAX_DEPTH = 8
-MIGRACAO_LIMIAR_VOTOS = 30  # |diff_comparecimento| acima disso
+MIGRACAO_LIMIAR_VOTOS = 30
+RESIDUAL_ALTO = 5.0
 
 def to_numeric_safe(s):
     return pd.to_numeric(s, errors="coerce").fillna(0)
@@ -146,16 +148,9 @@ def explore_combinations(all_features, train_clean, test_clean, col_t2):
     beating_logit.sort(key=lambda x: x["delta"], reverse=True)
     return best_result, beating_logit[:10], baseline_logit
 
-def migracao_e_reverso(train_clean, test_clean, features, col_t1, col_t2, uf):
-    """Seções com alta |diff_comp| + logit reverso (T2 -> T1)."""
-    if "diff_comparecimento" not in test_clean.columns or col_t1 not in test_clean.columns:
-        return None
+def perfil_residual_alto(train_clean, test_clean, features, col_t2, uf):
+    """Perfil das seções com |residual| > 5 p.p."""
     try:
-        # Logit normal (T1 -> T2) só nas seções de alta migração
-        alta = test_clean[test_clean["diff_comparecimento"].abs() >= MIGRACAO_LIMIAR_VOTOS]
-        if len(alta) < 20:
-            return None
-
         X_tr = train_clean[features]
         y_tr = train_clean[col_t2]
         scaler = StandardScaler()
@@ -163,49 +158,50 @@ def migracao_e_reverso(train_clean, test_clean, features, col_t1, col_t2, uf):
         lin = LinearRegression()
         lin.fit(X_tr_s, y_tr)
 
-        X_alta = alta[features]
-        y_alta = alta[col_t2]
-        pred_alta = lin.predict(scaler.transform(X_alta))
-        residual_alta = y_alta - pred_alta
-        cob_alta, err_alta = evaluate_regression(lin, scaler.transform(X_alta), y_alta)
-
-        # Logit reverso: features do T2 para prever T1
-        features_t2 = [c for c in test_clean.columns if c.startswith("PCT_") and (c.endswith("_t2") or "T2_" in c)]
-        if not features_t2 or col_t1 not in train_clean.columns:
-            return {
-                "n_alta": len(alta),
-                "cob_alta": cob_alta,
-                "err_alta": err_alta,
-                "res_medio_alta": round(float(residual_alta.mean()), 2),
-            }
-
-        # treina reverso no treino
-        X_tr_rev = train_clean[features_t2].dropna()
-        if len(X_tr_rev) < 30:
+        if len(test_clean) == 0:
             return None
-        y_tr_rev = train_clean.loc[X_tr_rev.index, col_t1]
-        scaler_rev = StandardScaler()
-        X_tr_rev_s = scaler_rev.fit_transform(X_tr_rev)
-        lin_rev = LinearRegression()
-        lin_rev.fit(X_tr_rev_s, y_tr_rev)
+        X_te = test_clean[features]
+        y_te = test_clean[col_t2]
+        pred = lin.predict(scaler.transform(X_te))
+        residual = y_te - pred
 
-        # avalia reverso nas seções de alta migração
-        X_alta_rev = alta[features_t2].dropna()
-        if len(X_alta_rev) < 10:
-            cob_rev = None
+        detail = test_clean.copy()
+        detail["residual"] = residual.values
+        detail["abs_residual"] = detail["residual"].abs()
+        detail["aptos"] = detail.get("QT_APTOS_t1", pd.Series(np.nan, index=detail.index))
+        detail["diff_comp"] = detail.get("diff_comparecimento", pd.Series(np.nan, index=detail.index))
+        if "QT_COMPARECIMENTO_t1" in detail.columns and "QT_APTOS_t1" in detail.columns:
+            detail["abst_t1"] = 1 - (detail["QT_COMPARECIMENTO_t1"] / detail["QT_APTOS_t1"].replace(0, pd.NA))
         else:
-            y_alta_rev = alta.loc[X_alta_rev.index, col_t1]
-            cob_rev, _ = evaluate_regression(lin_rev, scaler_rev.transform(X_alta_rev), y_alta_rev)
+            detail["abst_t1"] = np.nan
+
+        # polarização aproximada: max PCT T1
+        pct_t1_cols = [c for c in detail.columns if c.startswith("PCT_") and c.endswith("_t1")]
+        if pct_t1_cols:
+            detail["polarizacao_t1"] = detail[pct_t1_cols].max(axis=1)
+        else:
+            detail["polarizacao_t1"] = np.nan
+
+        alto = detail[detail["abs_residual"] > RESIDUAL_ALTO]
+        if len(alto) < 5:
+            return None
+
+        # salva detalhe
+        id_cols = [c for c in ["SG_UF", "CD_MUNICIPIO", "NR_ZONA", "NR_SECAO"] if c in alto.columns]
+        keep = id_cols + ["residual", "abs_residual", "aptos", "diff_comp", "abst_t1", "polarizacao_t1"]
+        alto[keep].to_parquet(RESULTS / f"residual_alto_{uf}.parquet", index=False)
 
         return {
-            "n_alta": len(alta),
-            "cob_alta": cob_alta,
-            "err_alta": err_alta,
-            "res_medio_alta": round(float(residual_alta.mean()), 2),
-            "cob_reverso_alta": cob_rev,
+            "n_alto": len(alto),
+            "pct_alto": round(100 * len(alto) / len(detail), 2),
+            "aptos_medio": round(alto["aptos"].mean(), 1) if alto["aptos"].notna().any() else None,
+            "abst_medio": round(alto["abst_t1"].mean() * 100, 1) if alto["abst_t1"].notna().any() else None,
+            "diff_medio": round(alto["diff_comp"].mean(), 1) if alto["diff_comp"].notna().any() else None,
+            "polar_medio": round(alto["polarizacao_t1"].mean(), 1) if alto["polarizacao_t1"].notna().any() else None,
+            "res_medio": round(alto["residual"].mean(), 2),
         }
     except Exception as e:
-        print(f"  migracao {uf}: {e}")
+        print(f"  perfil residual {uf}: {e}")
         return None
 
 def main():
@@ -217,7 +213,7 @@ def main():
         return
 
     summary = []
-    migracao_rows = []
+    perfil_rows = []
     for jf in join_files:
         uf = jf.stem.replace("join_", "")
         print(f"\nProcessando {uf}...")
@@ -255,11 +251,11 @@ def main():
             continue
         best_feats, cob_te, cob_tr, best_tree, logit_best = best_result
 
-        # Análise de migração
-        mig = migracao_e_reverso(train_clean, test_clean, all_features, col_t1, col_t2, uf)
-        if mig:
-            migracao_rows.append({"uf": uf, **mig})
-            print(f"  alta migração: n={mig['n_alta']} cob={mig['cob_alta']}%")
+        # Perfil residual alto
+        perfil = perfil_residual_alto(train_clean, test_clean, all_features, col_t2, uf)
+        if perfil:
+            perfil_rows.append({"uf": uf, **perfil})
+            print(f"  residual alto: n={perfil['n_alto']} ({perfil['pct_alto']}%)")
 
         rules = ""
         if best_tree is not None:
@@ -287,17 +283,17 @@ def main():
                 f.write(f"{m['uf']:<6} {m['n_treino']:>8} {m['n_teste']:>8} {str(m['arvore_teste']):>8} {str(m['logit_baseline']):>8}\n")
         status_lines.append("resumo_mult3.txt escrito")
 
-    if migracao_rows:
-        with open(RESULTS / "migracao_alta.txt", "w", encoding="utf-8") as f:
-            f.write(f"Seções com |diff_comparecimento| >= {MIGRACAO_LIMIAR_VOTOS} votos\n")
-            f.write("cob_alta = cobertura do logit normal nessas seções\n")
-            f.write("cob_reverso = cobertura do logit reverso (T2->T1) nessas seções\n")
-            f.write("="*80 + "\n")
-            f.write(f"{'UF':<6} {'NAlta':>7} {'CobAlta':>8} {'ErrAlta':>8} {'ResMed':>8} {'CobRev':>8}\n")
-            f.write("-"*80 + "\n")
-            for r in migracao_rows:
-                f.write(f"{r['uf']:<6} {r['n_alta']:>7} {str(r.get('cob_alta')):>8} {str(r.get('err_alta')):>8} {str(r.get('res_medio_alta')):>8} {str(r.get('cob_reverso_alta')):>8}\n")
-        status_lines.append("migracao_alta.txt escrito")
+    if perfil_rows:
+        with open(RESULTS / "perfil_residual_alto.txt", "w", encoding="utf-8") as f:
+            f.write(f"Seções com |residual| > {RESIDUAL_ALTO} p.p.\n")
+            f.write("aptos_medio = QT_APTOS médio | abst_medio = taxa abstenção T1 (%)\n")
+            f.write("diff_medio = diff_comparecimento médio | polar_medio = max PCT T1\n")
+            f.write("="*90 + "\n")
+            f.write(f"{'UF':<6} {'NAlto':>7} {'%Alto':>7} {'Aptos':>7} {'Abst%':>7} {'Diff':>7} {'Polar':>7} {'ResMed':>8}\n")
+            f.write("-"*90 + "\n")
+            for r in perfil_rows:
+                f.write(f"{r['uf']:<6} {r['n_alto']:>7} {r['pct_alto']:>7} {str(r.get('aptos_medio')):>7} {str(r.get('abst_medio')):>7} {str(r.get('diff_medio')):>7} {str(r.get('polar_medio')):>7} {str(r.get('res_medio')):>8}\n")
+        status_lines.append("perfil_residual_alto.txt + residual_alto_*.parquet escritos")
 
     (RESULTS / "status.txt").write_text("\n".join(status_lines) + "\n", encoding="utf-8")
     print(f"\nResultados em {RESULTS.resolve()}")
