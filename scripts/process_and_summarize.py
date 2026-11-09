@@ -87,12 +87,10 @@ def aggregate_section(df: pd.DataFrame, label: str) -> pd.DataFrame:
             agg = agg.merge(tmp, on=keys, how="left")
     is_t2 = "2t" in label.lower()
     if is_t2:
-        # T2: só presidente (cargo 1), top 2
         pcts = extract_cargo_pcts(df, keys, "1", top_n=2, prefix="T2_")
         if not pcts.empty:
             agg = agg.merge(pcts, on=keys, how="left")
     else:
-        # T1: cargos federais
         for cargo, prefix, top in [("1", "PRES_", 3), ("3", "GOV_", 2), ("5", "SEN_", 2), ("6", "DEP_", 2)]:
             pcts = extract_cargo_pcts(df, keys, cargo, top_n=top, prefix=prefix)
             if not pcts.empty:
@@ -146,8 +144,10 @@ def evaluate_regression(model, X, y):
 
 def main():
     zips = sorted(RAW.glob("bweb_*.zip"))
+    print(f"Zips encontrados: {len(zips)}")
     if not zips:
         print("Nenhum zip em data/raw/")
+        (RESULTS / "status.txt").write_text("Nenhum zip encontrado\n", encoding="utf-8")
         return
     section_dfs = {}
     for zp in zips:
@@ -157,50 +157,56 @@ def main():
             label = zp.stem
             sec = aggregate_section(raw, label)
             section_dfs[label] = sec
-            print(f"  -> {len(raw)} linhas → {len(sec)} seções")
+            print(f"  -> {len(raw)} linhas → {len(sec)} seções | cols PCT: {sum(1 for c in sec.columns if c.startswith('PCT_'))}")
         except Exception as e:
             print(f"  ERRO: {e}")
     t1_keys = [k for k in section_dfs if "1t" in k]
     t2_keys = [k for k in section_dfs if "2t" in k]
+    print(f"T1: {len(t1_keys)} | T2: {len(t2_keys)}")
     summary = []
     for t1k in t1_keys:
         uf = t1k.split("_")[2] if "_" in t1k else "?"
         t2k = next((k for k in t2_keys if uf in k), None)
         if not t2k:
+            print(f"  {uf}: sem T2 correspondente")
             continue
         df1 = section_dfs[t1k]
         df2 = section_dfs[t2k]
         keys = [c for c in SECTION_KEYS if c in df1.columns and c in df2.columns]
         if not keys:
+            print(f"  {uf}: chaves de seção ausentes")
             continue
         merged = df1.merge(df2, on=keys, how="inner", suffixes=("_t1", "_t2"))
         print(f"Join {uf}: {len(merged)} seções")
+        if len(merged) == 0:
+            continue
         if "QT_COMPARECIMENTO_t1" in merged.columns and "QT_COMPARECIMENTO_t2" in merged.columns:
             merged["diff_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] - merged["QT_COMPARECIMENTO_t1"]
             merged["razao_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] / merged["QT_COMPARECIMENTO_t1"].replace(0, pd.NA)
         col_t1, col_t2 = find_best_candidate_match(merged)
         if not col_t1:
+            print(f"  {uf}: nenhum match de candidato")
             continue
+        print(f"  {uf}: alvo = {col_t2}")
         train, test = split_mult3(merged)
         if train is None or len(train) < 30:
+            print(f"  {uf}: treino insuficiente ({0 if train is None else len(train)})")
             continue
         features = get_features(merged)
         train_clean = train.dropna(subset=[col_t2] + features)
         test_clean = test.dropna(subset=[col_t2] + features)
         if len(train_clean) < 30:
-            print(f"  {uf}: poucas seções válidas no treino após dropna")
+            print(f"  {uf}: poucas seções válidas no treino após dropna ({len(train_clean)})")
             continue
         X_train = train_clean[features]
         y_train = train_clean[col_t2]
         X_test = test_clean[features]
         y_test = test_clean[col_t2]
-        # Árvore
         tree = DecisionTreeRegressor(max_depth=MAX_DEPTH, random_state=42, min_samples_leaf=15)
         tree.fit(X_train, y_train)
         cob_tree_tr, err_tree_tr = evaluate_regression(tree, X_train, y_train)
         cob_tree_te, err_tree_te = evaluate_regression(tree, X_test, y_test)
         rules = export_text(tree, feature_names=list(features))[:2500]
-        # Linear
         scaler = StandardScaler()
         X_train_s = scaler.fit_transform(X_train)
         X_test_s = scaler.transform(X_test) if len(X_test) > 0 else X_test
@@ -208,7 +214,6 @@ def main():
         lin.fit(X_train_s, y_train)
         cob_lin_tr, err_lin_tr = evaluate_regression(lin, X_train_s, y_train)
         cob_lin_te, err_lin_te = evaluate_regression(lin, X_test_s, y_test) if len(X_test) > 0 else (None, None)
-        # Logit binário
         y_bin_train = (y_train >= BINARY_THRESHOLD).astype(int)
         logit_acc = None
         if y_bin_train.nunique() >= 2 and len(X_test) > 0:
@@ -234,6 +239,7 @@ def main():
             "linear_teste": cob_lin_te,
             "logit_teste": logit_acc,
         })
+    status_lines = [f"UFs processadas: {len(summary)}"]
     if summary:
         with open(RESULTS / "resumo_mult3.txt", "w", encoding="utf-8") as f:
             f.write("Resumo: modelos treinados apenas nos múltiplos de 3\n")
@@ -243,7 +249,12 @@ def main():
             f.write("-"*70 + "\n")
             for m in summary:
                 f.write(f"{m['uf']:<6} {m['n_treino']:>8} {m['n_teste']:>8} {str(m['arvore_treino']):>8} {str(m['arvore_teste']):>8} {str(m['linear_treino']):>8} {str(m['linear_teste']):>8} {str(m['logit_teste']):>10}\n")
+        status_lines.append("resumo_mult3.txt escrito")
+    else:
+        status_lines.append("Nenhuma UF gerou resumo")
+    (RESULTS / "status.txt").write_text("\n".join(status_lines) + "\n", encoding="utf-8")
     print(f"\nResultados em {RESULTS.resolve()}")
+    print("\n".join(status_lines))
 
 if __name__ == "__main__":
     main()
