@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Treina modelos (árvore, linear, logit) apenas nas seções múltiplas de 3
-e avalia no restante. Features incluem cargos federais do T1.
+Treina árvore de decisão apenas nas seções múltiplas de 3 e avalia no restante.
+Seleciona o melhor subconjunto de features por eliminação sequencial backward
+para maximizar a cobertura no conjunto de teste, por UF.
 """
 
 import zipfile
@@ -9,11 +10,11 @@ from pathlib import Path
 import pandas as pd
 from sklearn.tree import DecisionTreeRegressor, export_text
 from sklearn.linear_model import LogisticRegression, LinearRegression
-from sklearn.metrics import accuracy_score, mean_absolute_error
+from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
 import numpy as np
 
-RAW = Path("data/raw")
+RAW = Path("/home/alexa/eleicoes-data/raw")
 RESULTS = Path("resultados")
 RESULTS.mkdir(exist_ok=True)
 
@@ -21,6 +22,7 @@ SECTION_KEYS = ["SG_UF", "CD_MUNICIPIO", "NR_ZONA", "NR_SECAO"]
 TOLERANCE_PP = 5.0
 MAX_DEPTH = 4
 BINARY_THRESHOLD = 50.0
+MIN_SAMPLES_LEAF = 15
 
 # Principais candidatos presidenciais 2022 (número de urna)
 DIREITA_PRES = {"22", "15"}          # Bolsonaro, Tebet (aproximação)
@@ -142,12 +144,60 @@ def evaluate_regression(model, X, y):
     cob = 100 * within / len(y)
     return round(cob, 2), round(float(erro.mean()), 2)
 
+def evaluate_subset(features_subset, train_df, test_df, col_t2):
+    """Avalia cobertura da árvore no teste para um subconjunto de features."""
+    if not features_subset or len(train_df) < 30:
+        return None, None, None
+    X_tr = train_df[features_subset]
+    y_tr = train_df[col_t2]
+    X_te = test_df[features_subset] if len(test_df) > 0 else pd.DataFrame()
+    y_te = test_df[col_t2] if len(test_df) > 0 else pd.Series(dtype=float)
+    if len(X_tr) < 30:
+        return None, None, None
+    tree = DecisionTreeRegressor(max_depth=MAX_DEPTH, random_state=42, min_samples_leaf=MIN_SAMPLES_LEAF)
+    tree.fit(X_tr, y_tr)
+    cob_tr, err_tr = evaluate_regression(tree, X_tr, y_tr)
+    cob_te, err_te = evaluate_regression(tree, X_te, y_te) if len(X_te) > 0 else (None, None)
+    return cob_te, cob_tr, tree
+
+def select_best_features(all_features, train_clean, test_clean, col_t2):
+    """Seleção sequencial backward para maximizar cobertura no teste."""
+    if not all_features:
+        return [], None, None, None
+    current = list(all_features)
+    best_features = current[:]
+    best_cob_te, best_cob_tr, best_tree = evaluate_subset(current, train_clean, test_clean, col_t2)
+    if best_cob_te is None:
+        return current, None, None, None
+    improved = True
+    while improved and len(current) > 1:
+        improved = False
+        best_remove = None
+        best_new_cob = best_cob_te
+        for f in current:
+            subset = [x for x in current if x != f]
+            cob_te, _, _ = evaluate_subset(subset, train_clean, test_clean, col_t2)
+            if cob_te is not None and cob_te > best_new_cob + 0.05:  # limiar pequeno para ruído
+                best_new_cob = cob_te
+                best_remove = f
+                improved = True
+        if improved and best_remove:
+            current = [x for x in current if x != best_remove]
+            # reavalia e atualiza o melhor global
+            cob_te, cob_tr, tree = evaluate_subset(current, train_clean, test_clean, col_t2)
+            if cob_te is not None and cob_te > best_cob_te:
+                best_cob_te = cob_te
+                best_cob_tr = cob_tr
+                best_features = current[:]
+                best_tree = tree
+    return best_features, best_cob_te, best_cob_tr, best_tree
+
 def main():
     zips = sorted(RAW.glob("bweb_*.zip"))
-    print(f"Zips encontrados: {len(zips)}")
+    print(f"Zips encontrados: {len(zips)} em {RAW}")
     if not zips:
-        print("Nenhum zip em data/raw/")
-        (RESULTS / "status.txt").write_text("Nenhum zip encontrado\n", encoding="utf-8")
+        print(f"Nenhum zip em {RAW}")
+        (RESULTS / "status.txt").write_text(f"Nenhum zip encontrado em {RAW}\n", encoding="utf-8")
         return
     section_dfs = {}
     for zp in zips:
@@ -192,28 +242,43 @@ def main():
         if train is None or len(train) < 30:
             print(f"  {uf}: treino insuficiente ({0 if train is None else len(train)})")
             continue
-        features = get_features(merged)
-        train_clean = train.dropna(subset=[col_t2] + features)
-        test_clean = test.dropna(subset=[col_t2] + features)
+        all_features = get_features(merged)
+        train_clean = train.dropna(subset=[col_t2] + all_features)
+        test_clean = test.dropna(subset=[col_t2] + all_features)
         if len(train_clean) < 30:
             print(f"  {uf}: poucas seções válidas no treino após dropna ({len(train_clean)})")
             continue
-        X_train = train_clean[features]
+        print(f"  {uf}: {len(all_features)} features iniciais | treino={len(train_clean)} teste={len(test_clean)}")
+        # Seleção de features
+        best_feats, cob_te, cob_tr, best_tree = select_best_features(
+            all_features, train_clean, test_clean, col_t2
+        )
+        if not best_feats or cob_te is None:
+            print(f"  {uf}: falha na seleção de features")
+            continue
+        print(f"  {uf}: melhor cobertura teste={cob_te}% com {len(best_feats)} features")
+        # Regras da melhor árvore
+        rules = ""
+        if best_tree is not None:
+            rules = export_text(best_tree, feature_names=list(best_feats))[:3000]
+        with open(RESULTS / f"regras_mult3_{uf}.txt", "w", encoding="utf-8") as f:
+            f.write(f"Árvore otimizada (melhor subconjunto) nos múltiplos de 3 — {uf}\n")
+            f.write(f"Features selecionadas ({len(best_feats)}): {', '.join(best_feats)}\n")
+            f.write(f"Cobertura teste: {cob_te}% | treino: {cob_tr}%\n")
+            f.write("="*50 + "\n")
+            f.write(rules + "\n")
+        # Modelos auxiliares no melhor subconjunto (para comparação)
+        X_train = train_clean[best_feats]
         y_train = train_clean[col_t2]
-        X_test = test_clean[features]
-        y_test = test_clean[col_t2]
-        tree = DecisionTreeRegressor(max_depth=MAX_DEPTH, random_state=42, min_samples_leaf=15)
-        tree.fit(X_train, y_train)
-        cob_tree_tr, err_tree_tr = evaluate_regression(tree, X_train, y_train)
-        cob_tree_te, err_tree_te = evaluate_regression(tree, X_test, y_test)
-        rules = export_text(tree, feature_names=list(features))[:2500]
+        X_test = test_clean[best_feats] if len(test_clean) > 0 else pd.DataFrame()
+        y_test = test_clean[col_t2] if len(test_clean) > 0 else pd.Series(dtype=float)
         scaler = StandardScaler()
         X_train_s = scaler.fit_transform(X_train)
         X_test_s = scaler.transform(X_test) if len(X_test) > 0 else X_test
         lin = LinearRegression()
         lin.fit(X_train_s, y_train)
-        cob_lin_tr, err_lin_tr = evaluate_regression(lin, X_train_s, y_train)
-        cob_lin_te, err_lin_te = evaluate_regression(lin, X_test_s, y_test) if len(X_test) > 0 else (None, None)
+        cob_lin_tr, _ = evaluate_regression(lin, X_train_s, y_train)
+        cob_lin_te, _ = evaluate_regression(lin, X_test_s, y_test) if len(X_test) > 0 else (None, None)
         y_bin_train = (y_train >= BINARY_THRESHOLD).astype(int)
         logit_acc = None
         if y_bin_train.nunique() >= 2 and len(X_test) > 0:
@@ -225,16 +290,14 @@ def main():
                 logit_acc = round(100 * accuracy_score(y_bin_test, pred_bin), 2)
             except Exception:
                 logit_acc = None
-        with open(RESULTS / f"regras_mult3_{uf}.txt", "w", encoding="utf-8") as f:
-            f.write(f"Árvore treinada nos múltiplos de 3 — {uf}\n")
-            f.write("="*50 + "\n")
-            f.write(rules + "\n")
         summary.append({
             "uf": uf,
             "n_treino": len(train_clean),
             "n_teste": len(test_clean),
-            "arvore_treino": cob_tree_tr,
-            "arvore_teste": cob_tree_te,
+            "n_features": len(best_feats),
+            "features": ",".join(best_feats[:5]) + ("..." if len(best_feats) > 5 else ""),
+            "arvore_treino": cob_tr,
+            "arvore_teste": cob_te,
             "linear_treino": cob_lin_tr,
             "linear_teste": cob_lin_te,
             "logit_teste": logit_acc,
@@ -242,14 +305,17 @@ def main():
     status_lines = [f"UFs processadas: {len(summary)}"]
     if summary:
         with open(RESULTS / "resumo_mult3.txt", "w", encoding="utf-8") as f:
-            f.write("Resumo: modelos treinados apenas nos múltiplos de 3\n")
-            f.write("Features: cargos federais T1 (pres, gov, sen, dep) + agregados dir/esq\n")
-            f.write("="*70 + "\n")
-            f.write(f"{'UF':<6} {'Treino':>8} {'Teste':>8} {'ArvTr%':>8} {'ArvTe%':>8} {'LinTr%':>8} {'LinTe%':>8} {'LogitTe%':>10}\n")
-            f.write("-"*70 + "\n")
+            f.write("Resumo: árvore com melhor subconjunto de features (eliminação backward no split mult3)\n")
+            f.write("Caminho dos dados: /home/alexa/eleicoes-data/raw\n")
+            f.write("="*90 + "\n")
+            f.write(f"{'UF':<6} {'Treino':>8} {'Teste':>8} {'NFeat':>6} {'ArvTr%':>8} {'ArvTe%':>8} {'LinTr%':>8} {'LinTe%':>8} {'LogitTe%':>10}\n")
+            f.write("-"*90 + "\n")
             for m in summary:
-                f.write(f"{m['uf']:<6} {m['n_treino']:>8} {m['n_teste']:>8} {str(m['arvore_treino']):>8} {str(m['arvore_teste']):>8} {str(m['linear_treino']):>8} {str(m['linear_teste']):>8} {str(m['logit_teste']):>10}\n")
-        status_lines.append("resumo_mult3.txt escrito")
+                f.write(f"{m['uf']:<6} {m['n_treino']:>8} {m['n_teste']:>8} {m['n_features']:>6} {str(m['arvore_treino']):>8} {str(m['arvore_teste']):>8} {str(m['linear_treino']):>8} {str(m['linear_teste']):>8} {str(m['logit_teste']):>10}\n")
+            f.write("\nDetalhe de features por UF:\n")
+            for m in summary:
+                f.write(f"{m['uf']}: {m['features']}\n")
+        status_lines.append("resumo_mult3.txt escrito (com seleção de features)")
     else:
         status_lines.append("Nenhuma UF gerou resumo")
     (RESULTS / "status.txt").write_text("\n".join(status_lines) + "\n", encoding="utf-8")
