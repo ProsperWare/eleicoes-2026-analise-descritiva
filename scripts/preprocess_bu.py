@@ -39,9 +39,15 @@ def to_numeric_safe(s):
 
 def extract_cargo_pcts(df: pd.DataFrame, keys: list, cargo_code: str, top_n: int = 3, prefix: str = "") -> pd.DataFrame:
     if "QT_VOTOS" not in df.columns or "CD_CARGO" not in df.columns:
+        print(f"    [DEBUG] Faltam colunas. Disponíveis: {list(df.columns)[:20]}")
         return pd.DataFrame()
+    # Normaliza CD_CARGO
+    df = df.copy()
+    df["CD_CARGO"] = df["CD_CARGO"].astype(str).str.strip().str.lstrip("0")
     work = df[df["CD_CARGO"] == cargo_code].copy()
     if work.empty:
+        unique_cargos = df["CD_CARGO"].unique()[:10]
+        print(f"    [DEBUG] Cargo {cargo_code} vazio. Cargos únicos (amostra): {unique_cargos}")
         return pd.DataFrame()
     work["QT_VOTOS"] = to_numeric_safe(work["QT_VOTOS"])
     totals = work.groupby(keys)["QT_VOTOS"].sum().reset_index().rename(columns={"QT_VOTOS": "TOTAL_VOTOS"})
@@ -71,6 +77,7 @@ def aggregate_section(df: pd.DataFrame, label: str) -> pd.DataFrame:
     keys = [c for c in SECTION_KEYS if c in df.columns]
     if not keys:
         raise ValueError(f"Chaves de seção não encontradas em {label}")
+    print(f"    Colunas no raw: {list(df.columns)[:15]}...")
     agg = df.groupby(keys, as_index=False).size().rename(columns={"size": "linhas"})
     for col in ["QT_COMPARECIMENTO", "QT_APTOS", "QT_ABSTENCOES"]:
         if col in df.columns:
@@ -82,11 +89,17 @@ def aggregate_section(df: pd.DataFrame, label: str) -> pd.DataFrame:
         pcts = extract_cargo_pcts(df, keys, "1", top_n=2, prefix="T2_")
         if not pcts.empty:
             agg = agg.merge(pcts, on=keys, how="left")
+            print(f"    T2: {len([c for c in pcts.columns if c.startswith('PCT_')])} colunas PCT")
+        else:
+            print(f"    T2: nenhuma coluna PCT gerada")
     else:
         for cargo, prefix, top in [("1", "PRES_", 3), ("3", "GOV_", 2), ("5", "SEN_", 2), ("6", "DEP_", 2)]:
             pcts = extract_cargo_pcts(df, keys, cargo, top_n=top, prefix=prefix)
             if not pcts.empty:
                 agg = agg.merge(pcts, on=keys, how="left")
+                print(f"    Cargo {cargo}: {len([c for c in pcts.columns if c.startswith('PCT_')])} colunas PCT")
+            else:
+                print(f"    Cargo {cargo}: nenhuma coluna PCT")
     agg["origem"] = label
     return agg
 
@@ -122,7 +135,7 @@ def main():
                 sec.to_parquet(parquet_path, index=False)
                 section_dfs[label] = sec
                 rebuilt += 1
-                print(f"  -> {len(sec)} seções salvas")
+                print(f"  -> {len(sec)} seções salvas | colunas: {len(sec.columns)}")
             except Exception as e:
                 print(f"  ERRO: {e}")
         else:
@@ -142,7 +155,6 @@ def main():
         if not t2k:
             continue
         join_path = PROCESSED / f"join_{uf}.parquet"
-        # Sempre reconstrói o join para garantir sufixos corretos
         df1 = section_dfs[t1k]
         df2 = section_dfs[t2k]
         keys = [c for c in SECTION_KEYS if c in df1.columns and c in df2.columns]
@@ -155,7 +167,8 @@ def main():
             merged["diff_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] - merged["QT_COMPARECIMENTO_t1"]
             merged["razao_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] / merged["QT_COMPARECIMENTO_t1"].replace(0, pd.NA)
         merged.to_parquet(join_path, index=False)
-        print(f"  Join {uf}: {len(merged)} seções salvas (com sufixos)")
+        pct_cols = [c for c in merged.columns if c.startswith("PCT_")]
+        print(f"  Join {uf}: {len(merged)} seções | {len(pct_cols)} colunas PCT")
 
     print(f"\nPré-processamento concluído. Reconstruídos: {rebuilt} arquivos.")
     print(f"Dados em {PROCESSED}")
