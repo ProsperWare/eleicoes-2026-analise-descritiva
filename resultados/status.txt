@@ -1,2 +1,1 @@
 UFs processadas: 28
-Bins de 0.1 p.p. + regiões gerados

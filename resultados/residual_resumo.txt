@@ -1,4 +1,4 @@
-Residual do linear (teste) — bins 0.1 p.p.
+Residual do linear (teste)
 UF            N   ResMed   ResStd   %<=5pp
 ----------------------------------------
 AC         1445    0.159    2.854    94.05
