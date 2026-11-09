@@ -134,7 +134,6 @@ def main():
         info = residual_distribuicao(train_clean, test_clean, features, col_t2, uf)
         if info:
             rows.append({"uf": uf, **info})
-            # recarrega o csv para agregar
             dist_path = RESULTS / f"residual_dist_{uf}.csv"
             if dist_path.exists():
                 d = pd.read_csv(dist_path)
