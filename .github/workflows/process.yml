@@ -76,11 +76,6 @@ jobs:
           python scripts/download_bu.py --all
         continue-on-error: true
 
-      - name: Limpar cache de processados (força regeneração completa)
-        run: |
-          rm -rf /home/alexa/eleicoes-data/processed/*
-          echo "Cache de processados limpo"
-
       - name: Pré-processar BUs (agrega e salva Parquet — só reprocessa se necessário)
         run: python scripts/preprocess_bu.py
 
@@ -96,8 +91,6 @@ jobs:
             echo "Nada para commitar em resultados/"
           else
             git commit -m "Atualiza resultados [skip ci]"
-            # actions/checkout deixa HEAD detached no SHA do disparo.
-            # Integra origin/main e envia HEAD:main, com retentativas se o remoto avançar.
             attempts=3
             for attempt in 1 2 3; do
               if ! git fetch origin main; then
