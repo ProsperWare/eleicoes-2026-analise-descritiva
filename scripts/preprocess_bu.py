@@ -2,13 +2,11 @@
 """
 Pré-processa BUs: agrega por seção e faz join T1×T2 por UF.
 Salva resultados em /home/alexa/eleicoes-data/processed/ como Parquet.
-Só reprocessa se os zips forem mais novos que os Parquets existentes.
 """
 
 import zipfile
 from pathlib import Path
 import pandas as pd
-import os
 
 RAW = Path("/home/alexa/eleicoes-data/raw")
 PROCESSED = Path("/home/alexa/eleicoes-data/processed")
@@ -37,38 +35,60 @@ def load_bu_zip(zip_path: Path) -> pd.DataFrame:
 def to_numeric_safe(s):
     return pd.to_numeric(s, errors="coerce").fillna(0)
 
+def detect_columns(df: pd.DataFrame) -> dict:
+    cols = list(df.columns)
+    cargo_col = None
+    for c in ["CD_CARGO", "CD_CARGO_PERGUNTA", "DS_CARGO_PERGUNTA"]:
+        if c in cols:
+            cargo_col = c
+            break
+    votos_col = None
+    for c in ["QT_VOTOS", "QT_VOTOS_NOMINAIS", "QT_VOTOS_VALIDOS"]:
+        if c in cols:
+            votos_col = c
+            break
+    # fallback: qualquer coluna com VOTO no nome
+    if not votos_col:
+        for c in cols:
+            if "VOTO" in c.upper() and "QT_" in c.upper():
+                votos_col = c
+                break
+    return {"cargo": cargo_col, "votos": votos_col}
+
 def extract_cargo_pcts(df: pd.DataFrame, keys: list, cargo_code: str, top_n: int = 3, prefix: str = "") -> pd.DataFrame:
-    if "QT_VOTOS" not in df.columns or "CD_CARGO" not in df.columns:
-        print(f"    [DEBUG] Faltam colunas. Disponíveis: {list(df.columns)[:20]}")
+    detected = detect_columns(df)
+    cargo_col = detected["cargo"]
+    votos_col = detected["votos"]
+    if not cargo_col or not votos_col:
+        print(f"    [DEBUG] Colunas não detectadas. cargo={cargo_col} votos={votos_col}")
+        print(f"    Colunas com CARGO/VOTO/QT: {[c for c in df.columns if any(x in c.upper() for x in ['CARGO','VOTO','QT_'])]}")
         return pd.DataFrame()
-    # Normaliza CD_CARGO
     df = df.copy()
-    df["CD_CARGO"] = df["CD_CARGO"].astype(str).str.strip().str.lstrip("0")
-    work = df[df["CD_CARGO"] == cargo_code].copy()
+    df[cargo_col] = df[cargo_col].astype(str).str.strip().str.lstrip("0")
+    work = df[df[cargo_col] == cargo_code].copy()
     if work.empty:
-        unique_cargos = df["CD_CARGO"].unique()[:10]
-        print(f"    [DEBUG] Cargo {cargo_code} vazio. Cargos únicos (amostra): {unique_cargos}")
+        print(f"    [DEBUG] Cargo {cargo_code} vazio em {cargo_col}. Únicos: {df[cargo_col].unique()[:8]}")
         return pd.DataFrame()
-    work["QT_VOTOS"] = to_numeric_safe(work["QT_VOTOS"])
-    totals = work.groupby(keys)["QT_VOTOS"].sum().reset_index().rename(columns={"QT_VOTOS": "TOTAL_VOTOS"})
-    cand_totals = work.groupby(["NR_VOTAVEL", "NM_VOTAVEL"])["QT_VOTOS"].sum().reset_index()
-    top_cands = cand_totals.nlargest(top_n, "QT_VOTOS")["NR_VOTAVEL"].tolist()
+    work[votos_col] = to_numeric_safe(work[votos_col])
+    totals = work.groupby(keys)[votos_col].sum().reset_index().rename(columns={votos_col: "TOTAL_VOTOS"})
+    cand_totals = work.groupby(["NR_VOTAVEL", "NM_VOTAVEL"])[votos_col].sum().reset_index()
+    top_cands = cand_totals.nlargest(top_n, votos_col)["NR_VOTAVEL"].tolist()
     result = totals[keys].copy()
     for nr in top_cands:
         name = cand_totals.loc[cand_totals["NR_VOTAVEL"] == nr, "NM_VOTAVEL"].iloc[0]
         safe = "".join(c if c.isalnum() else "_" for c in str(name)[:30])
         col = f"PCT_{prefix}{safe}"
-        cand_votes = work[work["NR_VOTAVEL"] == nr].groupby(keys)["QT_VOTOS"].sum().reset_index()
+        cand_votes = work[work["NR_VOTAVEL"] == nr].groupby(keys)[votos_col].sum().reset_index()
         cand_votes = cand_votes.merge(totals, on=keys, how="left")
-        cand_votes[col] = (cand_votes["QT_VOTOS"] / cand_votes["TOTAL_VOTOS"].replace(0, pd.NA)) * 100
+        cand_votes[col] = (cand_votes[votos_col] / cand_votes["TOTAL_VOTOS"].replace(0, pd.NA)) * 100
         result = result.merge(cand_votes[keys + [col]], on=keys, how="left")
     if cargo_code == "1":
-        dir_votes = work[work["NR_VOTAVEL"].isin(DIREITA_PRES)].groupby(keys)["QT_VOTOS"].sum().reset_index()
-        esq_votes = work[work["NR_VOTAVEL"].isin(ESQUERDA_PRES)].groupby(keys)["QT_VOTOS"].sum().reset_index()
+        dir_votes = work[work["NR_VOTAVEL"].isin(DIREITA_PRES)].groupby(keys)[votos_col].sum().reset_index()
+        esq_votes = work[work["NR_VOTAVEL"].isin(ESQUERDA_PRES)].groupby(keys)[votos_col].sum().reset_index()
         dir_votes = dir_votes.merge(totals, on=keys, how="left")
         esq_votes = esq_votes.merge(totals, on=keys, how="left")
-        dir_votes["PCT_DIR_PRES"] = (dir_votes["QT_VOTOS"] / dir_votes["TOTAL_VOTOS"].replace(0, pd.NA)) * 100
-        esq_votes["PCT_ESQ_PRES"] = (esq_votes["QT_VOTOS"] / esq_votes["TOTAL_VOTOS"].replace(0, pd.NA)) * 100
+        dir_votes["PCT_DIR_PRES"] = (dir_votes[votos_col] / dir_votes["TOTAL_VOTOS"].replace(0, pd.NA)) * 100
+        esq_votes["PCT_ESQ_PRES"] = (esq_votes[votos_col] / esq_votes["TOTAL_VOTOS"].replace(0, pd.NA)) * 100
         result = result.merge(dir_votes[keys + ["PCT_DIR_PRES"]], on=keys, how="left")
         result = result.merge(esq_votes[keys + ["PCT_ESQ_PRES"]], on=keys, how="left")
     return result
@@ -77,7 +97,8 @@ def aggregate_section(df: pd.DataFrame, label: str) -> pd.DataFrame:
     keys = [c for c in SECTION_KEYS if c in df.columns]
     if not keys:
         raise ValueError(f"Chaves de seção não encontradas em {label}")
-    print(f"    Colunas no raw: {list(df.columns)[:15]}...")
+    detected = detect_columns(df)
+    print(f"    Detectado: cargo={detected['cargo']} votos={detected['votos']}")
     agg = df.groupby(keys, as_index=False).size().rename(columns={"size": "linhas"})
     for col in ["QT_COMPARECIMENTO", "QT_APTOS", "QT_ABSTENCOES"]:
         if col in df.columns:
