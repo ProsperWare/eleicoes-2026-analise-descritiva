@@ -53,6 +53,10 @@ def main():
         if "2026" in anos:
             run([sys.executable, "scripts/download_logs.py"], "Download logs 2026")
 
+    # Diagnóstico dos CSVs antigos (sempre que 2018 ou 2022 estiverem na lista)
+    if "2018" in anos or "2022" in anos:
+        run([sys.executable, "scripts/diagnostico_csv.py"], "Diagnóstico CSVs 2018/2022")
+
     # Pré-processamento (2026, 2022 e 2018)
     if not args.skip_preprocess:
         for ano in anos:
