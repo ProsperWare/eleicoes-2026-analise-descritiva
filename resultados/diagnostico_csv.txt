@@ -1,0 +1,24 @@
+=== Diagnóstico CSVs 2018/2022 ===
+
+
+--- 2018 ---
+  bu_2018_1t_AC.csv: 5783370 bytes | HTML=False | ;=True | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00\x11�JM�}\t\x04\x0f�S\x00@;u\x07\x1b\x00 | \x00bweb_1t_AC_101020181938.csvUT\t\x00\x03я�[���[ux | \x00\x01\x04�\x01\x00\x00\x04�\x01\x00\x00��ےcǱ.j\u07b7Y�CY��\x19�\x03���*JT���<u�}#����fk�m�Z|A]m��L\x17�\x1a=�\x0f '
+  bu_2018_1t_AL.csv: 14745786 bytes | HTML=False | ;=False | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00(�JMQ�\x15V\x7f`�\x00¬6\x14\x1b\x00 | \x00bweb_1t_AL_101020181938.csvUT\t\x00\x03���[я�[ux | \x00\x01\x04�\x01\x00\x00\x04�\x01\x00\x00��ݎ'
+  bu_2018_1t_AM.csv: 22128366 bytes | HTML=False | ;=False | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00I�JMCσk�\x06M\x01�\x1b |  | \x1b\x00'
+  bu_2018_1t_AP.csv: 6634284 bytes | HTML=False | ;=True | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00S�JM�� | :�`\x00|Ao\x08\x1b\x00 | \x00bweb_1t_AP_101020181940.csvUT\t\x00\x03M��[;��[ux'
+  bu_2018_1t_BA.csv: 76266045 bytes | HTML=False | ;=False | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00I�JM�C��\x02\x1a�\x04\x16��j\x1b\x00 | \x00bweb_1t_BA_101020181941.csvUT\t\x00\x03\x1a��[N��[ux | \x00\x01\x04�\x01\x00\x00\x04�\x01\x00\x00��ˮ'
+  bu_2018_1t_CE.csv: 49167907 bytes | HTML=False | ;=False | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00j�JM������\x02Q4�D\x1b\x00 | \x00bweb_1t_CE_101020181945.csvUT\t\x00\x03W��[ | ��[ux'
+  bu_2018_1t_DF.csv: 30528551 bytes | HTML=False | ;=True | preview: "PK\x03\x04\x14\x00\x00\x00\x08\x00t�JM\x18�Q6�3�\x01d��'\x1b\x00 | \x00bweb_1t_DF_101020181947.csvUT\t\x00\x03l��[^��[ux | \x00\x01\x04�\x01\x00\x00\x04�\x01\x00\x00��ێdǕ�{�7��@�n[v>x_\x053#U�M��y\x10P}S�VU�\tԒ\x1a\\�z�}�@?�P\x17�\x1a=��p�=�l���9�V�1\x00Qd\x04\x19\x11��K?�c�ٛw���\uf7bfyz�������\x7f���\x0f�����<\x7f���"
+  bu_2018_1t_ES.csv: 25154899 bytes | HTML=False | ;=False | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00|�JM��.h\x185{\x01�!\x1b\x00 | \x00bweb_1t_ES_101020181949.csvUT\t\x00\x03|��[n��[ux | \x00\x01\x04�\x01\x00\x00\x04�\x01\x00\x00��ێ$ǵ.j�7��@Ծn�v>D_��E��I�6\x0f\x02�7\x02��&���R�SK��w�\x16\x13���hw����J\x1bf����b)\x06 ���2"#�+�����ao>��_������߾�����oo���w��������'
+  ... e mais 45 arquivos
+
+--- 2022 ---
+  bu_2022_1t_AC.csv: 6125666 bytes | HTML=False | ;=True | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00ĂEUfa\x04��\x7fX\x000\x08�\x08\x1b\x00 | \x00bweb_1t_AC_051020221321.csvUT\t\x00\x030�=c\x13�=cux | \x00\x01\x04�\x03\x00\x00\x04�\x03\x00\x00��r\x1b9����\x14\x08�y���(�\t�\x02I�(�FU�[�(h���\x08[���>�#�[L�aB'
+  bu_2022_1t_AL.csv: 15222584 bytes | HTML=False | ;=False | preview: "PK\x03\x04\x14\x00\x00\x00\x08\x00\x01�EU\x11�\x12��N�\x00�\x19�\x15\x1b\x00 | \x00bweb_1t_AL_051020221321.csvUT\t\x00\x03��=c0�=cux | \x00\x01\x04�\x03\x00\x00\x04�\x03\x00\x00��r�6����)P�f�n��\x7f�=�C\x12���\x00\x1b$��\x1b���ܨ�m���y�N\x16�,�J�&��Y�'��"
+  bu_2022_1t_AM.csv: 22350241 bytes | HTML=False | ;=True | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00S�EUI\uaafb\x03\x11P\x01��� | \x1b\x00 | \x00bweb_1t_AM_051020221321.csvUT\t\x00\x03>�=c��=cux'
+  bu_2022_1t_AP.csv: 6436152 bytes | HTML=False | ;=True | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00f�EU�\x01���<]\x00��\x08\x1b\x00 | \x00bweb_1t_AP_051020221321.csvUT\t\x00\x03_�=c��=cux | \x00\x01\x04�\x03\x00\x00\x04�\x03\x00\x00�Ks\x1b9����+\x10�ÞZ��C}JV�$$T���b�tQ�-�,#lqBv�����ϻ\x7f`b\x0e�'
+  bu_2022_1t_BA.csv: 87291644 bytes | HTML=False | ;=True | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00(�EUĶs�^�.\x05p؛\x7f\x1b\x00 | \x00bweb_1t_BA_051020221321.csvUT\t\x00\x03��=c_�=cux | \x00\x01\x04�\x03\x00\x00\x04�\x03\x00\x00��r\x1b9����\x14\x08�aO�������\x02��Q\x00\x07UŶuQ�-�.#diBm���-<>t�Ч���m�\x0f�\x04{_d��(Y���eAm8\x0f�YU�\x02X\x1f\x13�L$\x12Gy}VH\x07\x19أ\x7f9Z,�\x0e��3��'
+  bu_2022_1t_CE.csv: 52916380 bytes | HTML=False | ;=False | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00\x19�EU� | Qi�w"\x03D��M\x1b\x00 | \x00bweb_1t_CE_051020221321.csvUT\t\x00\x03r�=c��=cux'
+  bu_2022_1t_DF.csv: 27597689 bytes | HTML=False | ;=False | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00R�EU=\u0382��"�\x01L��%\x1b\x00 | \x00bweb_1t_DF_051020221321.csvUT\t\x00\x03ܵ=cr�=cux | \x00\x01\x04�\x03\x00\x00\x04�\x03\x00\x00��r�8����\x14\x08�aN�ѿ��S��(� �\x06Iu�\x17����UD�5��9��U�a�&�Oۧ�M�a�`�LJ\x16��LT�Ex�Ɉ��H�\x04�O\t$2\x13�N\\�$�A\x04���٬v\x00��H-Uu\x14�7���gLzxƗ�'
+  bu_2022_1t_ES.csv: 25757607 bytes | HTML=False | ;=False | preview: 'PK\x03\x04\x14\x00\x00\x00\x08\x00��EUU�A�\t\x0f�\x01\x19�J#\x1b\x00 | \x00bweb_1t_ES_051020221321.csvUT\t\x00\x03~�=cܵ=cux | \x00\x01\x04�\x03\x00\x00\x04�\x03\x00\x00�Ks�8����+\x10�s{��d���"!'
+  ... e mais 30 arquivos
