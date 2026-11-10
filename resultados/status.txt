@@ -1,2 +1,2 @@
-UFs processadas: 28
+UFs processadas: 73
 Top 2% gerado
