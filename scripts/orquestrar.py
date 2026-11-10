@@ -53,11 +53,13 @@ def main():
         if "2026" in anos:
             run([sys.executable, "scripts/download_logs.py"], "Download logs 2026")
 
-    # Pré-processamento e residual (atualmente só 2026 está implementado no preprocess)
+    # Pré-processamento (2026, 2022 e 2018)
     if not args.skip_preprocess:
-        if "2026" in anos:
-            run([sys.executable, "scripts/preprocess_bu.py"], "Pré-processar BUs 2026")
+        for ano in anos:
+            if ano in ("2026", "2022", "2018"):
+                run([sys.executable, "scripts/preprocess_bu.py", "--ano", ano], f"Pré-processar BUs {ano}")
 
+    # Residual (por enquanto só 2026 está plenamente adaptado)
     if not args.skip_residual:
         if "2026" in anos:
             run([sys.executable, "scripts/process_and_summarize.py"], "Residual + top 2% 2026")
