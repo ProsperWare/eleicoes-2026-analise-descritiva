@@ -67,6 +67,8 @@ def main():
         run([sys.executable, "scripts/process_and_summarize.py", "--anos"] + anos, "Residual + top 2% por ano")
         if "2026" in anos:
             run([sys.executable, "scripts/residual_fatores.py"], "Fatores do residual 2026")
+        if set(["2018", "2022", "2026"]).issubset(set(anos)):
+            run([sys.executable, "scripts/intersecao_3anos.py"], "Interseção top 2% dos 3 anos")
 
     print("\nOrquestração concluída.")
 
