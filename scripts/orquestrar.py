@@ -49,24 +49,23 @@ def main():
         if "2022" in anos:
             run([sys.executable, "scripts/download_bu_2022.py"], "Download BUs 2022")
 
-        # Logs só fazem sentido para 2026 por enquanto
         if "2026" in anos:
             run([sys.executable, "scripts/download_logs.py"], "Download logs 2026")
 
-    # Diagnóstico dos CSVs antigos (sempre que 2018 ou 2022 estiverem na lista)
+    # Diagnóstico
     if "2018" in anos or "2022" in anos:
         run([sys.executable, "scripts/diagnostico_csv.py"], "Diagnóstico CSVs 2018/2022")
 
-    # Pré-processamento (2026, 2022 e 2018)
+    # Pré-processamento
     if not args.skip_preprocess:
         for ano in anos:
             if ano in ("2026", "2022", "2018"):
                 run([sys.executable, "scripts/preprocess_bu.py", "--ano", ano], f"Pré-processar BUs {ano}")
 
-    # Residual (por enquanto só 2026 está plenamente adaptado)
+    # Residual por ano + comparação
     if not args.skip_residual:
+        run([sys.executable, "scripts/process_and_summarize.py", "--anos"] + anos, "Residual + top 2% por ano")
         if "2026" in anos:
-            run([sys.executable, "scripts/process_and_summarize.py"], "Residual + top 2% 2026")
             run([sys.executable, "scripts/residual_fatores.py"], "Fatores do residual 2026")
 
     print("\nOrquestração concluída.")
