@@ -172,6 +172,14 @@ def preparar_transferencias(df: pd.DataFrame) -> pd.DataFrame:
 
     decendios = [c for c in df.columns if "decendio" in _sem_acento(c)]
     col_valor = _coluna_por_nome(df, "valor")
+    col_codigo = None
+    for coluna in df.columns:
+        chave = _sem_acento(str(coluna))
+        if any(parte in chave for parte in ("decendio", "transferencia", "valor", "item")):
+            continue
+        if any(parte in chave for parte in ("ibge", "siafi", "codmun", "codigo municipio", "cd mun")):
+            col_codigo = coluna
+            break
     if decendios:
         total = sum((_numero_flex(df[c]).fillna(0) for c in decendios), start=0)
         print(f"Transferências: soma de {len(decendios)} colunas de decêndio")
@@ -195,6 +203,9 @@ def preparar_transferencias(df: pd.DataFrame) -> pd.DataFrame:
     if col_siafi:
         saida["codigo_siafi"] = df[col_siafi]
         chaves.append("codigo_siafi")
+    if col_codigo and col_codigo not in (col_muni, col_uf, col_ibge, col_siafi):
+        saida["codigo_origem"] = df[col_codigo].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+        chaves.append("codigo_origem")
     if not chaves:
         return saida
     return saida.groupby(chaves, dropna=False, as_index=False)["transferencia_liquida"].sum()

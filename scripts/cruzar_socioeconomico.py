@@ -79,6 +79,39 @@ def _sem_acento(texto: str) -> str:
     return " ".join(base.split())
 
 
+# Grafia do Tesouro (sem apóstrofo: "DOeste", "DAliança", "Major Izidoro") → IBGE de 7 dígitos.
+# A chave é (UF, norm_nome_chave). Municípios só de um lado (Fernando de Noronha, Boa Esperança do Norte) ficam de fora.
+_ALIAS_TESOURO_IBGE = (
+    ("AL", "Major Izidoro", "2704401"),
+    ("AP", "Pedra Branca do Amapari", "1600154"),
+    ("BA", "Muquem de Sao Francisco", "2922250"),
+    ("BA", "Quijingue", "2925907"),
+    ("BA", "Santa Teresinha", "2928505"),
+    ("MG", "Brasopolis", "3108909"),
+    ("MG", "Dona Euzebia", "3122900"),
+    ("MG", "Ponte Chique", "3152131"),
+    ("MT", "Poxoreo", "5107008"),
+    ("PB", "Joca Claudino", "2513653"),
+    ("PB", "Sao Domingos", "2513968"),
+    ("PE", "Lagoa do Itaenga", "2608503"),
+    ("PI", "Capitao Gervasio de Oliveira", "2202455"),
+    ("PI", "Pau DArco", "2207793"),
+    ("RN", "Acu", "2400208"),
+    ("RN", "Januario Cicco", "2405306"),
+    ("RN", "Presidente Juscelino", "2410306"),
+    ("SC", "Luiz Alves", "4210001"),
+    ("SE", "Gracho Cardoso", "2802601"),
+    ("SP", "Florinia", "3516101"),
+    ("TO", "Sao Valerio", "1720499"),
+    ("TO", "Tabocao", "1708254"),
+)
+
+UFS_BRASILEIRAS = {
+    "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT",
+    "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO",
+}
+
+
 def norm_nome(valor) -> str:
     if valor is None or (isinstance(valor, float) and np.isnan(valor)):
         return ""
@@ -122,6 +155,14 @@ def norm_ibge(valor) -> str:
     if len(digitos) == 6:
         return digitos
     return digitos.zfill(7)
+
+
+def norm_nome_chave(valor) -> str:
+    """Une D'Oeste/DOeste/Do Oeste e D'Água/DAgua para casar Tesouro e TSE."""
+    nome = norm_nome(valor)
+    nome = re.sub(r"\bD\s+", "D", nome)
+    nome = re.sub(r"\bDO\s+OESTE\b", "DOESTE", nome)
+    return nome
 
 
 def norm_uf(valor) -> str:
@@ -449,7 +490,169 @@ def carregar_idh() -> pd.DataFrame:
     return saida.reset_index(drop=True)
 
 
-def carregar_transferencias() -> pd.DataFrame:
+def _classificar_codigo_bruto(valor) -> tuple[str, str]:
+    """Devolve (tipo, chave) com tipo em ibge, ibge6, siafi ou vazio.
+
+    Aceita texto, inteiro e float no formato '1200401.0' / '0139.0'.
+    7 dígitos = IBGE; 6 = IBGE sem dígito verificador; 1–4 = SIAFI.
+    """
+    digitos = _digitos(valor)
+    if not digitos:
+        return "", ""
+    if len(digitos) > 7:
+        digitos = digitos[-7:]
+    if len(digitos) == 7:
+        return "ibge", digitos
+    if len(digitos) == 6:
+        return "ibge6", digitos
+    if 1 <= len(digitos) <= 4:
+        return "siafi", str(int(digitos))
+    return "", ""
+
+
+def _coluna_codigo_municipio(df: pd.DataFrame) -> str | None:
+    ignorar = ("transferencia", "decendio", "item", "valor", "ano", "mes", "populacao", "benefici")
+    candidatas = []
+    for coluna in df.columns:
+        chave = _sem_acento(str(coluna))
+        if any(parte in chave for parte in ignorar):
+            continue
+        if any(parte in chave for parte in ("ibge", "siafi", "codmun", "cd mun", "codigo")):
+            candidatas.append(coluna)
+    if not candidatas:
+        return None
+
+    def pontuar(coluna: str) -> int:
+        tipos = df[coluna].map(lambda v: _classificar_codigo_bruto(v)[0])
+        bonus = 10_000_000 if "ibge" in _sem_acento(str(coluna)) else 0
+        return bonus + int(tipos.isin(["ibge", "ibge6", "siafi"]).sum())
+
+    melhor = max(candidatas, key=pontuar)
+    if pontuar(melhor) == 0:
+        return None
+    return melhor
+
+
+def _mapas_crosswalk(crosswalk: pd.DataFrame) -> dict:
+    if crosswalk is None or crosswalk.empty:
+        return {"ibge": {}, "ibge6": {}, "siafi": {}, "nome": {}, "alias": {}}
+    tabela = crosswalk.copy()
+    tabela["ibge"] = _na_se_vazio(tabela["codigo_ibge"].map(norm_ibge)).fillna("").astype(str)
+    tabela["siafi"] = _na_se_vazio(tabela["codigo_siafi"].map(norm_siafi)).fillna("").astype(str)
+    tabela.loc[tabela["ibge"].isin(["<NA>", "nan", "None"]), "ibge"] = ""
+    tabela.loc[tabela["siafi"].isin(["<NA>", "nan", "None"]), "siafi"] = ""
+    tabela["ufn"] = tabela["uf"].map(norm_uf)
+    tabela["chave_nome"] = tabela["nome_municipio"].map(norm_nome_chave) + "|" + tabela["ufn"]
+    ibge = {}
+    siafi = {}
+    for _, linha in tabela.dropna(subset=["ibge"]).iterrows():
+        ibge[linha["ibge"]] = (linha["ibge"], linha["siafi"])
+        if linha["siafi"]:
+            siafi.setdefault(linha["siafi"], (linha["ibge"], linha["siafi"]))
+    ibge6 = {}
+    for codigo, par in ibge.items():
+        if len(codigo) == 7:
+            ibge6.setdefault(codigo[:6], par)
+    # prefixo de 6 dígitos ambíguo não serve para casar
+    contagem6: dict[str, int] = {}
+    for codigo in ibge:
+        if len(codigo) == 7:
+            contagem6[codigo[:6]] = contagem6.get(codigo[:6], 0) + 1
+    ibge6 = {k: v for k, v in ibge6.items() if contagem6.get(k) == 1}
+    nome = {}
+    for _, linha in tabela.iterrows():
+        chave = linha["chave_nome"]
+        if not chave or chave.startswith("|") or chave in nome:
+            if chave in nome and nome[chave] != (linha["ibge"], linha["siafi"]):
+                nome[chave] = None  # ambíguo
+            continue
+        nome[chave] = (linha["ibge"], linha["siafi"])
+    nome = {k: v for k, v in nome.items() if v}
+    alias = {
+        (uf, norm_nome_chave(nome_tesouro)): ibge_alvo
+        for uf, nome_tesouro, ibge_alvo in _ALIAS_TESOURO_IBGE
+    }
+    return {"ibge": ibge, "ibge6": ibge6, "siafi": siafi, "nome": nome, "alias": alias}
+
+
+def atribuir_codigos_transferencias(df: pd.DataFrame, crosswalk: pd.DataFrame) -> pd.DataFrame:
+    """Preenche codigo_ibge (7 dígitos) e codigo_siafi.
+
+    O CSV mensal do Tesouro (Município, UF, decêndios, tipo) não traz código.
+    Se aparecer uma coluna de código, ela é normalizada ('.0', zeros à esquerda,
+    IBGE de 6 dígitos → 7). O que sobra casa nome+UF no crosswalk.
+    """
+    saida = df.copy()
+    mapas = _mapas_crosswalk(crosswalk)
+    colunas_entrada = [str(c) for c in df.columns]
+    coluna = _coluna_codigo_municipio(saida)
+    valores_codigo = saida[coluna].copy() if coluna else None
+    saida["codigo_ibge"] = pd.NA
+    saida["codigo_siafi"] = pd.NA
+    nativos = 0
+    if coluna and valores_codigo is not None:
+        classes = valores_codigo.map(_classificar_codigo_bruto)
+        tipos = classes.map(lambda par: par[0])
+        contagem = tipos[tipos.ne("")].value_counts().to_dict()
+        print(f"Transferências: coluna de código '{coluna}' ({contagem or 'sem valores numéricos'})")
+        for indice, (tipo, chave) in classes.items():
+            par = None
+            if tipo == "ibge":
+                par = mapas["ibge"].get(chave)
+            elif tipo == "ibge6":
+                par = mapas["ibge6"].get(chave)
+            elif tipo == "siafi":
+                par = mapas["siafi"].get(chave)
+            if par and par[0]:
+                saida.at[indice, "codigo_ibge"] = par[0]
+                saida.at[indice, "codigo_siafi"] = par[1] or pd.NA
+                nativos += 1
+    else:
+        print(
+            "Transferências: sem coluna de código de município "
+            f"(colunas: {', '.join(colunas_entrada)}). "
+            "codigo_ibge/SIAFI saem do crosswalk pelo nome+UF."
+        )
+    nome_col = "nome_transf" if "nome_transf" in saida.columns else _coluna(saida, "municipio", "nome_municipio", "nome")
+    uf_col = "uf_transf" if "uf_transf" in saida.columns else _coluna(saida, "uf")
+    via_nome = 0
+    if nome_col and uf_col:
+        faltam = saida["codigo_ibge"].isna()
+        chaves = saida.loc[faltam, nome_col].map(norm_nome_chave) + "|" + saida.loc[faltam, uf_col].map(norm_uf)
+        for indice, chave in chaves.items():
+            par = mapas["nome"].get(chave)
+            if par is None and "|" in chave:
+                uf = chave.rsplit("|", 1)[1]
+                nome = chave.rsplit("|", 1)[0]
+                ibge_alias = mapas["alias"].get((uf, nome))
+                if ibge_alias:
+                    par = mapas["ibge"].get(norm_ibge(ibge_alias))
+            if par and par[0]:
+                saida.at[indice, "codigo_ibge"] = par[0]
+                saida.at[indice, "codigo_siafi"] = par[1] or pd.NA
+                via_nome += 1
+    if "codigo_ibge" in saida.columns:
+        com = saida.dropna(subset=["codigo_ibge"])
+        sem = saida[saida["codigo_ibge"].isna()]
+        if not com.empty:
+            agregacoes = {"transferencia_liquida": "sum"}
+            if "codigo_siafi" in com.columns:
+                agregacoes["codigo_siafi"] = "first"
+            if nome_col and nome_col in com.columns:
+                agregacoes[nome_col] = "first"
+            if uf_col and uf_col in com.columns:
+                agregacoes[uf_col] = "first"
+            com = com.groupby("codigo_ibge", dropna=False, as_index=False).agg(agregacoes)
+        saida = pd.concat([com, sem], ignore_index=True)
+    print(
+        f"Transferências: {nativos} municípios pelo código da própria base, "
+        f"{via_nome} pelo crosswalk (nome+UF), "
+        f"{int(saida['codigo_ibge'].isna().sum()) if 'codigo_ibge' in saida.columns else 0} sem código"
+    )
+    return saida
+
+
+def carregar_transferencias(crosswalk: pd.DataFrame | None = None) -> pd.DataFrame:
     caminho = DATA_SOCIO / "transferencias_municipios.csv"
     if not caminho.exists():
         print(f"AVISO: {caminho} não encontrado")
@@ -471,8 +674,7 @@ def carregar_transferencias() -> pd.DataFrame:
     saida = pd.DataFrame({"transferencia_liquida": total})
     col_nome = _coluna(df, "municipio", "nome_municipio", "nome")
     col_uf = _coluna(df, "uf")
-    col_ibge = _coluna(df, "codigo_ibge", "codmun7", "cd_mun")
-    col_siafi = _coluna(df, "codigo_siafi", "siafi", "codigo municipio siafi")
+    col_codigo = _coluna_codigo_municipio(df)
     chaves = []
     if col_nome:
         saida["nome_transf"] = df[col_nome]
@@ -480,16 +682,35 @@ def carregar_transferencias() -> pd.DataFrame:
     if col_uf:
         saida["uf_transf"] = df[col_uf].map(norm_uf)
         chaves.append("uf_transf")
-    if col_ibge:
-        saida["codigo_ibge"] = _na_se_vazio(df[col_ibge].map(norm_ibge))
-        chaves.append("codigo_ibge")
-    if col_siafi:
-        saida["codigo_siafi"] = _na_se_vazio(df[col_siafi].map(norm_siafi))
-        chaves.append("codigo_siafi")
+    if col_codigo and col_codigo not in (col_nome, col_uf):
+        # Valor cru (pode vir como 1200401.0, 120040 ou 0139). A normalização é depois.
+        saida["codigo_origem"] = df[col_codigo].astype(str)
+        chaves.append("codigo_origem")
     if chaves:
         saida = saida.groupby(chaves, dropna=False, as_index=False)["transferencia_liquida"].sum()
+    saida = atribuir_codigos_transferencias(saida, crosswalk if crosswalk is not None else pd.DataFrame())
     print(f"Transferências carregadas: {len(saida)} municípios")
     return saida
+
+
+def excluir_exterior(municipios: pd.DataFrame) -> pd.DataFrame:
+    """Tira do cruzamento a UF ZZ e códigos TSE sem IBGE fora do Brasil."""
+    if municipios.empty:
+        return municipios
+    uf = municipios["sg_uf"].map(norm_uf)
+    sem_ibge = municipios["codigo_ibge"].isna() if "codigo_ibge" in municipios.columns else pd.Series(True, index=municipios.index)
+    exterior = uf.eq("ZZ") | (~uf.isin(UFS_BRASILEIRAS) & sem_ibge)
+    if not exterior.any():
+        print("Exterior: nenhum município ZZ excluído")
+        return municipios
+    fora = municipios.loc[exterior]
+    secoes = int(pd.to_numeric(fora["n_secoes"], errors="coerce").fillna(0).sum()) if "n_secoes" in fora.columns else 0
+    eleitores = int(pd.to_numeric(fora["n_eleitores"], errors="coerce").fillna(0).sum()) if "n_eleitores" in fora.columns else 0
+    print(
+        f"Exterior excluído: {len(fora)} municípios, {secoes} seções, {eleitores} eleitores "
+        "(UF ZZ ou código TSE sem IBGE brasileiro)"
+    )
+    return municipios.loc[~exterior].reset_index(drop=True)
 
 
 def _mes_ordinal(valor) -> float:
@@ -658,7 +879,12 @@ def montar_cruzamento(ano: str) -> pd.DataFrame:
         f"Residual agregado: {len(municipios)} municípios, {int(municipios['n_secoes'].sum())} seções "
         "(média ponderada por comparecimento)"
     )
-    municipios = anexar_crosswalk(municipios, carregar_crosswalk())
+    crosswalk = carregar_crosswalk()
+    municipios = anexar_crosswalk(municipios, crosswalk)
+    municipios = excluir_exterior(municipios)
+    if municipios.empty:
+        print("Não foi possível agregar residual por município. Verifique colunas nos joins.")
+        return pd.DataFrame()
     municipios["ano"] = str(ano)
 
     idh = carregar_idh()
@@ -673,7 +899,7 @@ def montar_cruzamento(ano: str) -> pd.DataFrame:
     )
     _log_match("IDHM", municipios["match_idh"])
 
-    transf = carregar_transferencias()
+    transf = carregar_transferencias(crosswalk)
     colunas_transf = ["transferencia_liquida"]
     if "codigo_ibge" in transf.columns and transf["codigo_ibge"].notna().any():
         chave_transf = "codigo_ibge"
@@ -742,6 +968,10 @@ def _escrever_correlacao(ano: str, tabela: pd.DataFrame, destino: Path) -> None:
         "Bolsa Família: mes_referencia mais recente de cada município, não a média dos meses.",
         "Crosswalk: betafcc/Municipios-Brasileiros-TSE + kelvins/municipios-brasileiros (SIAFI),",
         "arquivo data/referencia/municipios_tse_ibge_siafi.csv.",
+        "Transferências: o CSV mensal do Tesouro não tem coluna de código (Município, UF, decêndios, tipo).",
+        "O codigo_ibge usado no cruzamento é o do crosswalk (nome+UF, com DOeste/D'Oeste unificados).",
+        "Se o arquivo trouxer código, ele é normalizado (sem '.0', SIAFI com zeros, IBGE de 6 dígitos casa nos 7).",
+        "Municípios da UF ZZ (exterior) ficam fora do cruzamento e das correlações.",
         "Per capita usa a população do IDHM 2010 (coluna pop) quando existe.",
         "",
     ]
