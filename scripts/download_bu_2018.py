@@ -3,11 +3,12 @@
 Download Boletins de Urna (BU) oficiais das Eleições 2018 do TSE.
 Fonte: https://dadosabertos.tse.jus.br/dataset/resultados-2018-boletim-de-urna
 
-Os arquivos são CSVs por UF e turno. Coloque-os em data/raw/2018/.
-Valida se o arquivo baixado parece um CSV válido.
+O endpoint devolve um ZIP contendo o CSV. Extrai o CSV e salva em data/raw/2018/.
 """
 
 import urllib.request
+import zipfile
+import tempfile
 from pathlib import Path
 
 RESOURCES = {
@@ -47,20 +48,33 @@ def is_valid_csv(path: Path) -> bool:
         return False
     try:
         with open(path, "rb") as f:
-            head = f.read(500).decode("utf-8", errors="ignore").lower()
-            if "<html" in head or "<!doctype" in head:
+            head = f.read(200)
+            if head.startswith(b"PK"):
                 return False
-            return ";" in head and any(x in head for x in ("cd_cargo", "qt_votos", "nr_secao", "sg_uf"))
+            text = head.decode("utf-8", errors="ignore").lower()
+            if "<html" in text or "<!doctype" in text:
+                return False
+            return ";" in text and any(x in text for x in ("cd_cargo", "qt_votos", "nr_secao", "sg_uf"))
     except Exception:
         return False
 
-def download_resource(resource_id: str, dest: Path):
-    if not resource_id:
-        return
+def download_and_extract(resource_id: str, dest_csv: Path):
     url = f"{BASE}/{resource_id}/download"
-    print(f"Baixando {url} -> {dest}")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    urllib.request.urlretrieve(url, dest)
+    print(f"Baixando {url}")
+    dest_csv.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        urllib.request.urlretrieve(url, tmp_path)
+    try:
+        with zipfile.ZipFile(tmp_path) as zf:
+            csv_names = [n for n in zf.namelist() if n.lower().endswith(".csv")]
+            if not csv_names:
+                raise RuntimeError("ZIP sem CSV")
+            with zf.open(csv_names[0]) as src, open(dest_csv, "wb") as dst:
+                dst.write(src.read())
+        print(f"  Extraído -> {dest_csv} ({dest_csv.stat().st_size} bytes)")
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 def main():
     raw = Path("data/raw/2018")
@@ -76,13 +90,10 @@ def main():
                 continue
             try:
                 if dest.exists():
-                    print(f"Arquivo inválido, rebaixando: {dest}")
                     dest.unlink()
-                download_resource(rid, dest)
-                if is_valid_csv(dest):
-                    print(f"  OK: {dest} ({dest.stat().st_size} bytes)")
-                else:
-                    print(f"  AVISO: {dest} não parece CSV válido após download")
+                download_and_extract(rid, dest)
+                if not is_valid_csv(dest):
+                    print(f"  AVISO: {dest} ainda não parece CSV válido")
             except Exception as e:
                 print(f"  Falha em {uf} {turn}: {e}")
     print("Download 2018 concluído.")
