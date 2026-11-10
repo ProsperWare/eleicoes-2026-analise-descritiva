@@ -69,9 +69,17 @@ jobs:
             echo "data/raw já tem conteúdo, mantendo"
           fi
 
-      - name: Download BUs (só o que falta)
+      - name: Download BUs 2026 (só o que falta)
         run: |
           python scripts/download_bu.py --all
+        continue-on-error: true
+
+      - name: Download BUs 2018
+        run: python scripts/download_bu_2018.py
+        continue-on-error: true
+
+      - name: Download BUs 2022
+        run: python scripts/download_bu_2022.py
         continue-on-error: true
 
       - name: Download logs da urna (2º turno)
