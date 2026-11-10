@@ -6,6 +6,7 @@ Uso:
   python scripts/orquestrar.py --anos 2026 2022 2018
   python scripts/orquestrar.py --anos 2022 --skip-download
   python scripts/orquestrar.py --anos 2026 --ufs SP MG
+  python scripts/orquestrar.py --anos 2026 2022 2018 --skip-benchmark
 """
 
 import argparse
@@ -36,6 +37,7 @@ def main():
     parser.add_argument("--skip-preprocess", action="store_true", help="Pula pré-processamento")
     parser.add_argument("--skip-residual", action="store_true", help="Pula cálculo de residual")
     parser.add_argument("--skip-socio", action="store_true", help="Pula cruzamento socioeconômico (IDH + transferências)")
+    parser.add_argument("--skip-benchmark", action="store_true", help="Pula benchmark de modelos vs logit")
     args = parser.parse_args()
 
     anos = [a.strip() for a in args.anos]
@@ -89,6 +91,16 @@ def main():
         for ano in anos:
             if ano in ("2026", "2022", "2018"):
                 run([sys.executable, "scripts/cruzar_socioeconomico.py", "--ano", ano], f"Cruzamento socioeconômico {ano}")
+
+    # Benchmark de ML. Roda por último: um erro aqui não interrompe o que veio antes,
+    # e o subprocess segue mesmo com código diferente de zero.
+    if not args.skip_benchmark:
+        anos_ml = [a for a in anos if a in ("2026", "2022", "2018")]
+        if anos_ml:
+            run(
+                [sys.executable, "scripts/benchmark_modelos.py", "--anos", *anos_ml],
+                "Benchmark de modelos vs logit",
+            )
 
     print("\nOrquestração concluída.")
 
