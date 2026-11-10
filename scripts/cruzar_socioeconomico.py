@@ -46,6 +46,7 @@ if __package__:
         residual_distribuicao,
         split_mult3,
     )
+    from . import baixar_socioeconomico as gastos
 else:
     from process_and_summarize import (
         find_best_candidate_match,
@@ -53,6 +54,7 @@ else:
         residual_distribuicao,
         split_mult3,
     )
+    import baixar_socioeconomico as gastos
 
 ROOT = Path(__file__).resolve().parents[1]
 PROCESSED = Path("/home/alexa/eleicoes-data/processed")
@@ -867,6 +869,119 @@ def _log_match(rotulo: str, serie: pd.Series) -> None:
     )
 
 
+COLUNAS_GASTO_PC = (
+    "siconfi_despesa_total",
+    "siconfi_despesa_saude",
+    "siconfi_despesa_educacao",
+    "siconfi_despesa_assistencia",
+    "siconfi_despesa_urbanismo",
+    "siconfi_receita_propria",
+    "siconfi_receita_transferida",
+    "siconfi_receita_fundeb",
+    "emendas_valor_pago_eleicao",
+    "emendas_valor_pago_ano_anterior",
+    "emendas_valor_pago_bienio",
+    "siops_despesa",
+    "siope_despesa",
+    "fundeb_repasse",
+    "convenio_valor",
+    "despesa_federal_valor",
+)
+
+LEGENDA_GASTO = (
+    "siconfi_despesa_total: despesas liquidadas exceto intraorçamentárias (Siconfi DCA Anexo I-E).",
+    "siconfi_despesa_saude: função 10 Saúde, despesas liquidadas (DCA I-E).",
+    "siconfi_despesa_educacao: função 12 Educação, despesas liquidadas (DCA I-E).",
+    "siconfi_despesa_assistencia: função 08 Assistência Social, despesas liquidadas (DCA I-E).",
+    "siconfi_despesa_urbanismo: função 15 Urbanismo, despesas liquidadas (DCA I-E).",
+    "siconfi_receita_propria: impostos, taxas e contribuições de melhoria, receitas brutas (DCA I-C, 1.1.0.0.00.0.0).",
+    "siconfi_receita_transferida: transferências correntes, receitas brutas (DCA I-C, 1.7.0.0.00.0.0).",
+    "siconfi_receita_fundeb: FUNDEB recebido pelo município no DCA (1.7.5.8.01.0.0), não o arquivo de repasse do FNDE.",
+    "siconfi_populacao: população informada pelo Siconfi no exercício do DCA.",
+    "emendas_valor_pago_eleicao: soma do valor pago das emendas no ano da eleição (Portal da Transparência, EmendasParlamentares.csv).",
+    "emendas_valor_pago_ano_anterior: idem, ano anterior à eleição.",
+    "emendas_valor_pago_bienio: soma dos dois anos.",
+    "siops_despesa: despesa SIOPS lida de arquivo local, se houver.",
+    "siope_despesa: despesa SIOPE lida de arquivo local, se houver.",
+    "fundeb_repasse: repasse FNDE/FUNDEB lido de arquivo local, se houver.",
+    "convenio_valor: transferências voluntárias/convênios lidas de arquivo local, se houver.",
+    "despesa_federal_valor: despesa federal por localidade lida de arquivo local agregado, se houver.",
+    "Colunas *_pc: valor dividido pela população do Siconfi no ano do DCA, ou pela pop do IDHM 2010 se a do Siconfi faltar.",
+)
+
+
+def _populacao_para_gasto(tabela: pd.DataFrame) -> pd.Series:
+    pop = pd.Series(np.nan, index=tabela.index, dtype="float64")
+    if "siconfi_populacao" in tabela.columns:
+        pop = _numero(tabela["siconfi_populacao"])
+    if "pop" in tabela.columns:
+        pop = pop.where(pop > 0, _numero(tabela["pop"]))
+    return pop
+
+
+def _per_capita_gastos(tabela: pd.DataFrame) -> pd.DataFrame:
+    pop = _populacao_para_gasto(tabela)
+    for coluna in COLUNAS_GASTO_PC:
+        if coluna in tabela.columns:
+            tabela[coluna + "_pc"] = _taxa(tabela[coluna], pop)
+    return tabela
+
+
+def anexar_gastos_publicos(municipios: pd.DataFrame, ano: str, crosswalk: pd.DataFrame) -> pd.DataFrame:
+    """Siconfi, emendas e bases locais. Falha de uma fonte não interrompe as outras."""
+    codigos = []
+    if "codigo_ibge" in municipios.columns:
+        codigos = [c for c in municipios["codigo_ibge"].map(norm_ibge) if c and len(c) == 7]
+    piloto = "1200401" if "1200401" in codigos else (codigos[0] if codigos else "1200401")
+    try:
+        exercicio = gastos.escolher_exercicio_siconfi(int(ano), piloto)
+        siconfi = gastos.garantir_siconfi(exercicio, codigos, pasta=DATA_SOCIO) if exercicio else pd.DataFrame()
+    except Exception as exc:
+        print(f"Siconfi: falhou ({exc}). Seguindo sem DCA.")
+        siconfi = pd.DataFrame()
+    if siconfi is not None and not siconfi.empty:
+        ordem = [
+            "siconfi_despesa_total", "siconfi_despesa_saude", "siconfi_despesa_educacao",
+            "siconfi_despesa_assistencia", "siconfi_despesa_urbanismo",
+            "siconfi_receita_propria", "siconfi_receita_transferida", "siconfi_receita_fundeb",
+            "siconfi_populacao", "siconfi_exercicio",
+        ]
+        colunas = [c for c in ordem if c in siconfi.columns]
+        municipios = _juntar_por_codigo_e_nome(municipios, siconfi, "codigo_ibge", "", "", colunas, "match_siconfi")
+        ano_dca = siconfi["siconfi_exercicio"].dropna().astype(str).iloc[0] if "siconfi_exercicio" in siconfi.columns and siconfi["siconfi_exercicio"].notna().any() else "?"
+        _log_match(f"Siconfi DCA {ano_dca}", municipios["match_siconfi"])
+    else:
+        print("Siconfi: sem dados; despesa por função fica de fora deste ano")
+
+    try:
+        bruto = gastos.garantir_emendas(pasta=DATA_SOCIO)
+        emendas = gastos.emendas_para_eleicao(bruto, int(ano))
+    except Exception as exc:
+        print(f"Emendas: falhou ({exc}). Seguindo sem emendas.")
+        emendas = pd.DataFrame()
+    if emendas is not None and not emendas.empty:
+        colunas = [c for c in emendas.columns if c != "codigo_ibge"]
+        municipios = _juntar_por_codigo_e_nome(municipios, emendas, "codigo_ibge", "", "", colunas, "match_emendas")
+        _log_match(f"Emendas {ano} e {int(ano) - 1}", municipios["match_emendas"])
+    else:
+        print("Emendas: sem dados para este cruzamento")
+
+    for fonte in gastos.FONTES_MANUAIS:
+        try:
+            extra = gastos.carregar_fonte_manual(fonte)
+        except Exception as exc:
+            print(f"{fonte['rotulo']}: falhou ({exc}). Pulando.")
+            continue
+        if extra is None or extra.empty or fonte["coluna"] not in extra.columns:
+            continue
+        nome_match = "match_" + fonte["coluna"]
+        municipios = _juntar_por_codigo_e_nome(
+            municipios, extra, "codigo_ibge", "", "", [fonte["coluna"]], nome_match,
+        )
+        _log_match(fonte["rotulo"], municipios[nome_match])
+    return municipios
+
+
 def montar_cruzamento(ano: str) -> pd.DataFrame:
     secoes = calcular_residuais_secao(ano)
     if secoes.empty:
@@ -931,6 +1046,8 @@ def montar_cruzamento(ano: str) -> pd.DataFrame:
     )
     _log_match("Bolsa Família", municipios["match_bolsa"])
 
+    municipios = anexar_gastos_publicos(municipios, str(ano), crosswalk)
+
     if "pop" in municipios.columns and "transferencia_liquida" in municipios.columns:
         municipios["transferencia_per_capita"] = _taxa(municipios["transferencia_liquida"], municipios["pop"])
     if "pop" in municipios.columns and "bolsa_valor_parcela" in municipios.columns:
@@ -939,6 +1056,7 @@ def montar_cruzamento(ano: str) -> pd.DataFrame:
         municipios["bolsa_beneficiarios_por_hab"] = _taxa(municipios["bolsa_n_beneficiarios"], municipios["pop"])
     if "bolsa_n_beneficiarios" in municipios.columns:
         municipios["bolsa_beneficiarios_por_eleitor"] = _taxa(municipios["bolsa_n_beneficiarios"], municipios["n_eleitores"])
+    municipios = _per_capita_gastos(municipios)
     if "pop" not in municipios.columns:
         print("Sem população do IDHM: medidas per capita de transferência e Bolsa ficam vazias; a razão por eleitor usa n_eleitores")
     return municipios
@@ -950,6 +1068,22 @@ def _escrever_correlacao(ano: str, tabela: pd.DataFrame, destino: Path) -> None:
         "transferencia_liquida", "transferencia_per_capita",
         "bolsa_valor_parcela", "bolsa_valor_per_capita",
         "bolsa_n_beneficiarios", "bolsa_beneficiarios_por_hab", "bolsa_beneficiarios_por_eleitor",
+        "siconfi_despesa_total", "siconfi_despesa_total_pc",
+        "siconfi_despesa_saude", "siconfi_despesa_saude_pc",
+        "siconfi_despesa_educacao", "siconfi_despesa_educacao_pc",
+        "siconfi_despesa_assistencia", "siconfi_despesa_assistencia_pc",
+        "siconfi_despesa_urbanismo", "siconfi_despesa_urbanismo_pc",
+        "siconfi_receita_propria", "siconfi_receita_propria_pc",
+        "siconfi_receita_transferida", "siconfi_receita_transferida_pc",
+        "siconfi_receita_fundeb", "siconfi_receita_fundeb_pc",
+        "emendas_valor_pago_eleicao", "emendas_valor_pago_eleicao_pc",
+        "emendas_valor_pago_ano_anterior", "emendas_valor_pago_ano_anterior_pc",
+        "emendas_valor_pago_bienio", "emendas_valor_pago_bienio_pc",
+        "siops_despesa", "siops_despesa_pc",
+        "siope_despesa", "siope_despesa_pc",
+        "fundeb_repasse", "fundeb_repasse_pc",
+        "convenio_valor", "convenio_valor_pc",
+        "despesa_federal_valor", "despesa_federal_valor_pc",
         "n_eleitores", "n_comparecimento", "n_secoes", "residual_mean_unweighted",
     ]
     presentes = []
@@ -972,7 +1106,12 @@ def _escrever_correlacao(ano: str, tabela: pd.DataFrame, destino: Path) -> None:
         "O codigo_ibge usado no cruzamento é o do crosswalk (nome+UF, com DOeste/D'Oeste unificados).",
         "Se o arquivo trouxer código, ele é normalizado (sem '.0', SIAFI com zeros, IBGE de 6 dígitos casa nos 7).",
         "Municípios da UF ZZ (exterior) ficam fora do cruzamento e das correlações.",
-        "Per capita usa a população do IDHM 2010 (coluna pop) quando existe.",
+        "Per capita de IDH/Bolsa/transferência constitucional usa a pop do IDHM 2010.",
+        "Per capita de gasto (Siconfi, emendas e bases locais) usa a população do Siconfi no ano do DCA e, se faltar, a pop do IDHM 2010.",
+        "Legenda das variáveis de gasto:",
+        *LEGENDA_GASTO,
+        "Fontes não baixadas automaticamente: SIOPS, SIOPE, repasse FNDE/FUNDEB, Transferegov/convênios e despesa federal por localidade.",
+        "Motivo: não há API em massa sem autenticação (ou o arquivo do portal é HTML/403 ou multi-GB). Se o CSV estiver em SOCIO_LOCAL_DIR, fora de raw/, ele entra.",
         "",
     ]
     if not presentes or "residual_mean" not in tabela.columns:
@@ -989,6 +1128,13 @@ def _escrever_correlacao(ano: str, tabela: pd.DataFrame, destino: Path) -> None:
         ("match_idh", "IDHM"),
         ("match_transferencias", "transferências"),
         ("match_bolsa", "Bolsa Família"),
+        ("match_siconfi", "Siconfi"),
+        ("match_emendas", "emendas"),
+        ("match_siops_despesa", "SIOPS"),
+        ("match_siope_despesa", "SIOPE"),
+        ("match_fundeb_repasse", "FUNDEB/FNDE"),
+        ("match_convenio_valor", "convênios"),
+        ("match_despesa_federal_valor", "despesa federal"),
     ):
         if coluna in tabela.columns:
             contagem = tabela[coluna].value_counts(dropna=False).to_dict()
@@ -1006,7 +1152,21 @@ def _ordenar_colunas(tabela: pd.DataFrame) -> pd.DataFrame:
         "transferencia_liquida", "transferencia_per_capita",
         "bolsa_mes_referencia", "bolsa_n_beneficiarios", "bolsa_valor_parcela",
         "bolsa_valor_per_capita", "bolsa_beneficiarios_por_hab", "bolsa_beneficiarios_por_eleitor",
+        "siconfi_exercicio", "siconfi_populacao",
+        "siconfi_despesa_total", "siconfi_despesa_saude", "siconfi_despesa_educacao",
+        "siconfi_despesa_assistencia", "siconfi_despesa_urbanismo",
+        "siconfi_receita_propria", "siconfi_receita_transferida", "siconfi_receita_fundeb",
+        "siconfi_despesa_total_pc", "siconfi_despesa_saude_pc", "siconfi_despesa_educacao_pc",
+        "siconfi_despesa_assistencia_pc", "siconfi_despesa_urbanismo_pc",
+        "siconfi_receita_propria_pc", "siconfi_receita_transferida_pc", "siconfi_receita_fundeb_pc",
+        "emendas_valor_pago_eleicao", "emendas_valor_pago_ano_anterior", "emendas_valor_pago_bienio",
+        "emendas_valor_pago_eleicao_pc", "emendas_valor_pago_ano_anterior_pc", "emendas_valor_pago_bienio_pc",
+        "siops_despesa", "siops_despesa_pc", "siope_despesa", "siope_despesa_pc",
+        "fundeb_repasse", "fundeb_repasse_pc", "convenio_valor", "convenio_valor_pc",
+        "despesa_federal_valor", "despesa_federal_valor_pc",
         "match_crosswalk", "match_idh", "match_transferencias", "match_bolsa",
+        "match_siconfi", "match_emendas", "match_siops_despesa", "match_siope_despesa",
+        "match_fundeb_repasse", "match_convenio_valor", "match_despesa_federal_valor",
     ]
     existentes = [c for c in ordem if c in tabela.columns]
     resto = [c for c in tabela.columns if c not in existentes]
@@ -1020,12 +1180,13 @@ def _ordenar_colunas(tabela: pd.DataFrame) -> pd.DataFrame:
             saida[coluna] = _numero(saida[coluna]).round(6)
     if "bolsa_n_beneficiarios" in saida.columns:
         saida["bolsa_n_beneficiarios"] = _numero(saida["bolsa_n_beneficiarios"]).round().astype("Int64")
-    for coluna in ("transferencia_liquida", "bolsa_valor_parcela"):
-        if coluna in saida.columns:
-            saida[coluna] = _numero(saida[coluna]).round(2)
-    for coluna in ("transferencia_per_capita", "bolsa_valor_per_capita", "bolsa_beneficiarios_por_hab", "bolsa_beneficiarios_por_eleitor"):
-        if coluna in saida.columns:
+    for coluna in saida.columns:
+        if coluna.endswith("_pc") or coluna in ("transferencia_per_capita", "bolsa_valor_per_capita", "bolsa_beneficiarios_por_hab", "bolsa_beneficiarios_por_eleitor"):
             saida[coluna] = _numero(saida[coluna]).round(6)
+        elif coluna in ("transferencia_liquida", "bolsa_valor_parcela") or coluna.startswith((
+            "siconfi_despesa", "siconfi_receita", "emendas_valor", "siops_", "siope_", "fundeb_", "convenio_", "despesa_federal",
+        )):
+            saida[coluna] = _numero(saida[coluna]).round(2)
     if "nome_municipio" in saida.columns:
         saida = saida.sort_values(["sg_uf", "nome_municipio"], kind="mergesort")
     return saida.reset_index(drop=True)

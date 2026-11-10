@@ -4,6 +4,7 @@ Baixa e prepara bases oficiais para cruzamento socioeconômico:
 - IDHM municipal (base Atlas Brasil — último censo completo 2010)
 - Transferências constitucionais mensais (Tesouro Transparente)
 - Bolsa Família / Novo Bolsa Família — arquivo local (SOCIO_LOCAL_DIR) ou Portal da Transparência
+- Gasto público: Siconfi/DCA (API) e emendas parlamentares (portal ou arquivo local)
 - Nota sobre IVS (Ipea)
 
 Nota sobre IDHM:
@@ -25,6 +26,7 @@ import re
 import tempfile
 import unicodedata
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -798,6 +800,481 @@ def baixar_bolsa_familia():
         return local
     return baixar_bolsa_remoto()
 
+SICONFI_DCA = "https://apidatalake.tesouro.gov.br/ords/siconfi/tt/dca"
+PORTAL_EMENDAS = "https://portaldatransparencia.gov.br/download-de-dados/emendas-parlamentares/{ano}"
+PAGINA_EMENDAS = "https://portaldatransparencia.gov.br/download-de-dados/emendas-parlamentares"
+
+# Fontes sem API em massa. Se o arquivo estiver em SOCIO_LOCAL_DIR (fora de raw/), entra no cruzamento.
+FONTES_MANUAIS = (
+    {
+        "rotulo": "SIOPS (saúde)",
+        "termos": ("siops",),
+        "coluna": "siops_despesa",
+        "pagina": "https://www.gov.br/saude/pt-br/acesso-a-informacao/siops",
+        "arquivo": "CSV/XLSX com 'siops' no nome, coluna de código IBGE (7 dígitos) e coluna de despesa/valor",
+        "motivo": "não há API pública em massa; o download do SIOPS é interativo",
+    },
+    {
+        "rotulo": "SIOPE (educação)",
+        "termos": ("siope",),
+        "coluna": "siope_despesa",
+        "pagina": "https://www.gov.br/fnde/pt-br/acesso-a-informacao/acoes-e-programas/financiamento/fundeb/siope",
+        "arquivo": "CSV com 'siope' no nome, código IBGE e valor (despesa ou por aluno)",
+        "motivo": "relatórios do SIOPE não têm endpoint estável sem navegação",
+    },
+    {
+        "rotulo": "FNDE/FUNDEB repasses",
+        "termos": ("fundeb", "fnde"),
+        "coluna": "fundeb_repasse",
+        "pagina": "https://www.gov.br/fnde/pt-br/acesso-a-informacao/acoes-e-programas/financiamento/fundeb/repasses-do-fundeb",
+        "arquivo": "CSV com 'fundeb' ou 'fnde' no nome, código IBGE e valor do repasse",
+        "motivo": "o OData do FNDE não respondeu; o FUNDEB lançado no DCA do município entra à parte como siconfi_receita_fundeb",
+    },
+    {
+        "rotulo": "Transferegov / convênios",
+        "termos": ("convenio", "transferegov", "voluntaria"),
+        "coluna": "convenio_valor",
+        "pagina": "https://portaldatransparencia.gov.br/download-de-dados/convenios",
+        "arquivo": "ZIP/CSV com 'convenio', 'transferegov' ou 'voluntaria' no nome (valor pago ou repassado e código IBGE)",
+        "motivo": "a página de transferências do portal devolve HTML, não um arquivo",
+    },
+    {
+        "rotulo": "Despesas federais por localidade",
+        "termos": ("despesas_federais", "despesa_localidade", "despesas-por-localidade"),
+        "coluna": "despesa_federal_valor",
+        "pagina": "https://portaldatransparencia.gov.br/download-de-dados/despesas",
+        "arquivo": "CSV já agregado por município cujo nome contenha 'despesas_federais' ou 'despesa_localidade'",
+        "motivo": "o download mensal do portal é multi-GB e o runner recebe HTML/403",
+    },
+)
+
+
+def diretorio_local_socio() -> Path:
+    return Path(os.environ.get("SOCIO_LOCAL_DIR", "/home/alexa/eleicoes-data"))
+
+
+def _codigo_ibge7(valor) -> str:
+    texto = "" if valor is None else str(valor).strip()
+    if texto.lower() in {"", "nan", "none", "<na>"}:
+        return ""
+    if re.fullmatch(r"\d+\.0", texto):
+        texto = texto[:-2]
+    digitos = re.sub(r"\D", "", texto)
+    if len(digitos) == 7:
+        return digitos
+    if len(digitos) == 6:
+        return digitos  # sem dígito verificador; o cruzamento completa se puder
+    return ""
+
+
+def _resposta_html(conteudo: bytes, content_type: str = "") -> bool:
+    dados = conteudo[3:] if conteudo.startswith(b"\xef\xbb\xbf") else conteudo
+    if dados.startswith(b"PK"):
+        return False
+    cabeca = dados[:1500].lstrip().lower()
+    if cabeca.startswith((b"<!doctype", b"<html", b"<head", b"<?xml")) or b"<html" in cabeca:
+        return True
+    tipo = (content_type or "").lower()
+    return ("text/html" in tipo or "application/xhtml" in tipo) and b";" not in cabeca[:200]
+
+
+def listar_arquivos_locais(termos: tuple[str, ...], extensoes: tuple[str, ...] = (".zip", ".csv", ".xlsx")) -> list[Path]:
+    """Busca em SOCIO_LOCAL_DIR, sem entrar em raw/."""
+    base = diretorio_local_socio()
+    if not base.is_dir():
+        return []
+    encontrados = []
+    for root, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if d.lower() != "raw"]
+        for nome in files:
+            lower = nome.lower()
+            if not lower.endswith(extensoes):
+                continue
+            if any(termo in lower for termo in termos):
+                encontrados.append(Path(root) / nome)
+    return encontrados
+
+
+def _escolher_arquivo_local(termos: tuple[str, ...]) -> Path | None:
+    candidatos = listar_arquivos_locais(termos)
+    if not candidatos:
+        return None
+
+    def rank(caminho: Path):
+        achados = re.findall(r"(20\d{2})", caminho.name)
+        ano = int(achados[-1]) if achados else 0
+        try:
+            mtime = caminho.stat().st_mtime
+        except OSError:
+            mtime = 0
+        return (ano, mtime)
+
+    return max(candidatos, key=rank)
+
+
+def _ler_tabela_flex(caminho: Path) -> pd.DataFrame | None:
+    lower = caminho.name.lower()
+    try:
+        if lower.endswith(".zip"):
+            with zipfile.ZipFile(caminho) as arquivo:
+                membros = [n for n in arquivo.namelist() if n.lower().endswith(".csv") and not n.endswith("/")]
+                if not membros:
+                    print(f"  {caminho.name}: zip sem CSV")
+                    return None
+                membro = max(membros, key=lambda n: arquivo.getinfo(n).file_size)
+                print(f"  CSV dentro do zip: {membro}")
+                with arquivo.open(membro) as bruto:
+                    amostra = bruto.read(4096)
+            if _resposta_html(amostra):
+                print(f"  {caminho.name}: conteúdo HTML, não é CSV")
+                return None
+            with zipfile.ZipFile(caminho) as arquivo:
+                with arquivo.open(membro) as bruto:
+                    return pd.read_csv(bruto, sep=None, engine="python", dtype=str, encoding="latin-1")
+        if lower.endswith(".xlsx"):
+            return pd.read_excel(caminho, dtype=str)
+        return pd.read_csv(caminho, sep=None, engine="python", dtype=str, encoding="utf-8")
+    except Exception as exc:
+        print(f"  Falha ao ler {caminho}: {exc}")
+        return None
+
+
+def _coluna_valor(df: pd.DataFrame) -> str | None:
+    preferidas = ("valor pago", "valor liquidado", "despesa liquidada", "despesa", "repasse", "valor", "pago")
+    for opcao in preferidas:
+        coluna = _coluna_por_nome(df, opcao)
+        if coluna and "codigo" not in _sem_acento(coluna) and "ibge" not in _sem_acento(coluna):
+            return coluna
+    return None
+
+
+def _coluna_ibge_tabela(df: pd.DataFrame) -> str | None:
+    return _coluna_por_nome(
+        df,
+        "codigo municipio ibge",
+        "codigo_ibge",
+        "codmun7",
+        "codigo ibge",
+        "cod ibge",
+        "ibge",
+    )
+
+
+def agregar_base_valor(df: pd.DataFrame, coluna_saida: str) -> pd.DataFrame:
+    col_ibge = _coluna_ibge_tabela(df)
+    col_valor = _coluna_valor(df)
+    if not col_ibge or not col_valor:
+        print(f"  Sem coluna de IBGE ou de valor (colunas: {list(df.columns)[:12]})")
+        return pd.DataFrame()
+    saida = pd.DataFrame({
+        "codigo_ibge": df[col_ibge].map(_codigo_ibge7),
+        coluna_saida: _numero_flex(df[col_valor]),
+    })
+    saida = saida[saida["codigo_ibge"].str.len().eq(7)]
+    if saida.empty:
+        return saida
+    return saida.groupby("codigo_ibge", as_index=False)[coluna_saida].sum()
+
+
+def carregar_fonte_manual(fonte: dict) -> pd.DataFrame:
+    """Lê um CSV/ZIP local se existir. Se não existir, registra a página e o nome do arquivo."""
+    rotulo = fonte["rotulo"]
+    try:
+        caminho = _escolher_arquivo_local(tuple(fonte["termos"]))
+    except Exception as exc:
+        print(f"{rotulo}: erro ao procurar arquivo local ({exc}). Pulando.")
+        return pd.DataFrame()
+    if caminho is None:
+        print(f"{rotulo}: pulado. {fonte['motivo']}")
+        print(f"  Baixe em {fonte['pagina']}")
+        print(f"  Arquivo esperado: {fonte['arquivo']}")
+        print(f"  Coloque em {diretorio_local_socio()} (não dentro de raw/).")
+        return pd.DataFrame()
+    print(f"{rotulo}: lendo arquivo local {caminho} ({caminho.stat().st_size} bytes)")
+    tabela = _ler_tabela_flex(caminho)
+    if tabela is None or tabela.empty:
+        print(f"{rotulo}: arquivo local não pôde ser agregado. Pulando.")
+        return pd.DataFrame()
+    agregado = agregar_base_valor(tabela, fonte["coluna"])
+    print(f"{rotulo}: {len(agregado)} municípios a partir de {caminho.name}")
+    return agregado
+
+
+def _funcao_dca(conta: str) -> str | None:
+    texto = " ".join(str(conta).split())
+    if texto.lower().startswith("despesas exceto intra"):
+        return "total"
+    if " - " not in texto:
+        return None
+    codigo, _resto = texto.split(" - ", 1)
+    if "." in codigo:
+        return None
+    return {
+        "08": "assistencia",
+        "10": "saude",
+        "12": "educacao",
+        "15": "urbanismo",
+    }.get(codigo.strip())
+
+
+def _receita_dca(cod_conta: str, conta: str) -> str | None:
+    codigo = str(cod_conta or "")
+    texto = str(conta or "")
+    if codigo == "RO1.1.0.0.00.0.0" or texto.startswith("1.1.0.0.00.0.0"):
+        return "propria"
+    if codigo == "RO1.7.0.0.00.0.0" or texto.startswith("1.7.0.0.00.0.0"):
+        return "transferida"
+    if codigo == "RO1.7.5.8.01.0.0" or texto.startswith("1.7.5.8.01.0.0"):
+        return "fundeb"
+    return None
+
+
+def agregar_itens_dca(items: list[dict]) -> dict:
+    """Reduz o JSON do DCA (anexos I-C e I-E) aos totais usados no cruzamento."""
+    saida = {
+        "siconfi_despesa_total": 0.0,
+        "siconfi_despesa_saude": 0.0,
+        "siconfi_despesa_educacao": 0.0,
+        "siconfi_despesa_assistencia": 0.0,
+        "siconfi_despesa_urbanismo": 0.0,
+        "siconfi_receita_propria": 0.0,
+        "siconfi_receita_transferida": 0.0,
+        "siconfi_receita_fundeb": 0.0,
+        "siconfi_populacao": None,
+    }
+    for item in items:
+        populacao = item.get("populacao")
+        if saida["siconfi_populacao"] is None and populacao not in (None, ""):
+            try:
+                saida["siconfi_populacao"] = float(populacao)
+            except (TypeError, ValueError):
+                pass
+        coluna = str(item.get("coluna") or "")
+        conta = str(item.get("conta") or "")
+        try:
+            valor = float(item.get("valor") or 0)
+        except (TypeError, ValueError):
+            continue
+        if coluna == "Despesas Liquidadas":
+            funcao = _funcao_dca(conta)
+            if funcao:
+                saida[f"siconfi_despesa_{funcao}"] += valor
+        elif coluna == "Receitas Brutas Realizadas":
+            receita = _receita_dca(str(item.get("cod_conta") or ""), conta)
+            if receita:
+                saida[f"siconfi_receita_{receita}"] += valor
+    return saida
+
+
+def _baixar_dca_ente(exercicio: int, ibge: str) -> dict | None:
+    itens = []
+    for anexo in ("DCA-Anexo I-E", "DCA-Anexo I-C"):
+        resposta = requests.get(
+            SICONFI_DCA,
+            params={"an_exercicio": exercicio, "no_anexo": anexo, "id_ente": int(ibge)},
+            timeout=25,
+        )
+        if resposta.status_code != 200 or _resposta_html(resposta.content, resposta.headers.get("Content-Type", "")):
+            continue
+        try:
+            itens.extend(resposta.json().get("items") or [])
+        except ValueError:
+            continue
+    if not itens:
+        return None
+    linha = agregar_itens_dca(itens)
+    linha["codigo_ibge"] = ibge
+    linha["siconfi_exercicio"] = exercicio
+    return linha
+
+
+def dca_disponivel(exercicio: int, ibge: str) -> bool:
+    try:
+        linha = _baixar_dca_ente(exercicio, ibge)
+    except Exception:
+        return False
+    return bool(linha and (linha.get("siconfi_despesa_total") or linha.get("siconfi_receita_propria")))
+
+
+def garantir_siconfi(exercicio: int, codigos: list[str], pasta: Path | None = None, workers: int = 4) -> pd.DataFrame:
+    """Baixa o DCA municipal na API do Siconfi e grava só o agregado (uma linha por município)."""
+    destino_dir = pasta or DATA_SOCIO
+    destino_dir.mkdir(parents=True, exist_ok=True)
+    cache = destino_dir / f"siconfi_dca_{exercicio}.csv"
+    pronto = pd.DataFrame()
+    ja: set[str] = set()
+    if cache.exists():
+        try:
+            pronto = pd.read_csv(cache, dtype={"codigo_ibge": str})
+            ja = set(pronto["codigo_ibge"].astype(str).str.zfill(7))
+            print(f"Siconfi {exercicio}: cache {cache.name} ({len(ja)} municípios)")
+        except Exception as exc:
+            print(f"Siconfi {exercicio}: cache ilegível ({exc}); baixando de novo")
+    faltam = [c.zfill(7) for c in codigos if c.zfill(7) not in ja]
+    if not faltam:
+        return pronto
+    print(f"Siconfi {exercicio}: API DCA para {len(faltam)} municípios (anexos I-C receita e I-E despesa por função)")
+    linhas = []
+    falhas = 0
+    feitos = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futuros = {pool.submit(_baixar_dca_ente, exercicio, codigo): codigo for codigo in faltam}
+        for futuro in as_completed(futuros):
+            feitos += 1
+            if feitos % 250 == 0 or feitos == len(faltam):
+                print(f"  Siconfi {exercicio}: {feitos}/{len(faltam)} consultas")
+            try:
+                linha = futuro.result()
+            except Exception:
+                falhas += 1
+                continue
+            if linha is None:
+                falhas += 1
+                continue
+            linhas.append(linha)
+    if linhas:
+        novo = pd.DataFrame(linhas)
+        pronto = pd.concat([pronto, novo], ignore_index=True)
+        pronto = pronto.drop_duplicates("codigo_ibge", keep="last")
+        pronto.to_csv(cache, index=False)
+        print(f"Siconfi {exercicio}: salvos {len(pronto)} municípios em {cache} ({falhas} falhas)")
+    else:
+        print(f"Siconfi {exercicio}: nenhum município novo ({falhas} falhas). Mantendo o cache existente.")
+    return pronto
+
+
+def escolher_exercicio_siconfi(ano_eleicao: int, codigo_piloto: str) -> int | None:
+    """Ano fiscal anterior à eleição; se o DCA não existe, recua até três anos."""
+    alvo = int(ano_eleicao) - 1
+    for exercicio in (alvo, alvo - 1, alvo - 2, alvo - 3):
+        try:
+            if dca_disponivel(exercicio, codigo_piloto):
+                if exercicio != alvo:
+                    print(f"Siconfi: DCA {alvo} indisponível para {codigo_piloto}; usando {exercicio}")
+                else:
+                    print(f"Siconfi: DCA {exercicio} disponível (piloto {codigo_piloto})")
+                return exercicio
+        except Exception as exc:
+            print(f"Siconfi: erro ao testar {exercicio} ({exc})")
+    print(f"Siconfi: sem DCA entre {alvo - 3} e {alvo}. Pulando.")
+    return None
+
+
+def _agregar_emendas_tabela(df: pd.DataFrame) -> pd.DataFrame:
+    col_ibge = _coluna_ibge_tabela(df)
+    col_ano = _coluna_por_nome(df, "ano da emenda", "ano", "exercicio")
+    col_pago = _coluna_por_nome(df, "valor pago", "valor liquidado", "valor empenhado", "valor")
+    if not col_ibge or not col_ano or not col_pago:
+        print(f"  Emendas: colunas insuficientes ({list(df.columns)[:14]})")
+        return pd.DataFrame()
+    saida = pd.DataFrame({
+        "codigo_ibge": df[col_ibge].map(_codigo_ibge7),
+        "ano": pd.to_numeric(df[col_ano], errors="coerce"),
+        "emendas_valor_pago": _numero_flex(df[col_pago]),
+    })
+    saida = saida[saida["codigo_ibge"].str.len().eq(7) & saida["ano"].notna()]
+    if saida.empty:
+        return saida
+    return saida.groupby(["codigo_ibge", "ano"], as_index=False)["emendas_valor_pago"].sum()
+
+
+def _ler_emendas_arquivo(caminho: Path) -> pd.DataFrame:
+    print(f"Emendas: lendo {caminho} ({caminho.stat().st_size} bytes)")
+    if caminho.name.lower().endswith(".zip"):
+        with zipfile.ZipFile(caminho) as arquivo:
+            membros = [
+                n for n in arquivo.namelist()
+                if n.lower().endswith(".csv") and "favorecido" not in n.lower() and "convenio" not in n.lower()
+            ]
+            if not membros:
+                print("  Zip de emendas sem o CSV principal")
+                return pd.DataFrame()
+            membro = sorted(membros, key=lambda n: (0 if n.lower().endswith("emendasparlamentares.csv") else 1, -arquivo.getinfo(n).file_size))[0]
+            print(f"  Membro usado: {membro}")
+            with arquivo.open(membro) as bruto:
+                tabela = pd.read_csv(bruto, sep=";", dtype=str, encoding="latin-1", low_memory=False)
+    else:
+        tabela = pd.read_csv(caminho, sep=None, engine="python", dtype=str, encoding="latin-1")
+    return _agregar_emendas_tabela(tabela)
+
+
+def garantir_emendas(pasta: Path | None = None) -> pd.DataFrame:
+    """Agrega valor pago de emendas por município e ano. Portal ou arquivo local."""
+    destino_dir = pasta or DATA_SOCIO
+    destino_dir.mkdir(parents=True, exist_ok=True)
+    cache = destino_dir / "emendas_municipio_ano.csv"
+    if cache.exists():
+        try:
+            tabela = pd.read_csv(cache, dtype={"codigo_ibge": str})
+            print(f"Emendas: cache {cache.name} ({len(tabela)} linhas município/ano)")
+            return tabela
+        except Exception as exc:
+            print(f"Emendas: cache ilegível ({exc})")
+    try:
+        local = _escolher_arquivo_local(("emenda",))
+    except Exception as exc:
+        print(f"Emendas: erro na busca local ({exc})")
+        local = None
+    if local is not None:
+        try:
+            agregado = _ler_emendas_arquivo(local)
+        except Exception as exc:
+            print(f"Emendas: falha no arquivo local {local.name} ({exc})")
+            agregado = pd.DataFrame()
+        if not agregado.empty:
+            agregado.to_csv(cache, index=False)
+            print(f"Emendas: agregadas de {local.name} -> {cache.name}")
+            return agregado
+    ano_url = datetime.now().year - 1
+    url = PORTAL_EMENDAS.format(ano=ano_url)
+    print(f"Emendas: tentando download {url}")
+    try:
+        resposta = requests.get(url, timeout=120, stream=True)
+        primeiro = next(resposta.iter_content(4096), b"")
+        if resposta.status_code != 200 or _resposta_html(primeiro, resposta.headers.get("Content-Type", "")):
+            print(f"Emendas: HTTP {resposta.status_code}, resposta não é o ZIP (HTML ou erro). Pulando o download.")
+            resposta.close()
+        else:
+            fd, tmp = tempfile.mkstemp(prefix="emendas_", suffix=".zip")
+            try:
+                with os.fdopen(fd, "wb") as arquivo:
+                    arquivo.write(primeiro)
+                    for bloco in resposta.iter_content(1024 * 256):
+                        if bloco:
+                            arquivo.write(bloco)
+                agregado = _ler_emendas_arquivo(Path(tmp))
+            finally:
+                resposta.close()
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            if not agregado.empty:
+                agregado.to_csv(cache, index=False)
+                print(f"Emendas: download {ano_url} agregado em {cache.name} ({len(agregado)} linhas)")
+                return agregado
+    except Exception as exc:
+        print(f"Emendas: download falhou ({exc})")
+    print("Emendas: pulado.")
+    print(f"  Baixe em {PAGINA_EMENDAS}")
+    print("  Arquivo: ZIP do ano (contém EmendasParlamentares.csv; não use o de favorecido nem o de convênios).")
+    print(f"  Salve com 'emenda' no nome em {diretorio_local_socio()} (fora de raw/).")
+    return pd.DataFrame()
+
+
+def emendas_para_eleicao(tabela: pd.DataFrame, ano_eleicao: int) -> pd.DataFrame:
+    if tabela is None or tabela.empty:
+        return pd.DataFrame()
+    trabalho = tabela.copy()
+    trabalho["ano"] = pd.to_numeric(trabalho["ano"], errors="coerce")
+    trabalho["emendas_valor_pago"] = pd.to_numeric(trabalho["emendas_valor_pago"], errors="coerce").fillna(0)
+    atual = trabalho[trabalho["ano"].eq(ano_eleicao)].groupby("codigo_ibge")["emendas_valor_pago"].sum()
+    anterior = trabalho[trabalho["ano"].eq(ano_eleicao - 1)].groupby("codigo_ibge")["emendas_valor_pago"].sum()
+    saida = pd.DataFrame({"codigo_ibge": sorted(set(atual.index) | set(anterior.index))})
+    saida["emendas_valor_pago_eleicao"] = saida["codigo_ibge"].map(atual).fillna(0)
+    saida["emendas_valor_pago_ano_anterior"] = saida["codigo_ibge"].map(anterior).fillna(0)
+    saida["emendas_valor_pago_bienio"] = saida["emendas_valor_pago_eleicao"] + saida["emendas_valor_pago_ano_anterior"]
+    return saida
+
+
 def baixar_ivs():
     print("IVS: base municipal completa disponível é de 2010.")
     print("Acesse https://ivs.ipea.gov.br/ ou dados.gov.br para download manual do XLSX municipal.")
@@ -817,6 +1294,11 @@ def main():
         baixar_bolsa_familia()
     except Exception as e:
         print(f"Erro ao baixar Bolsa Família: {e}")
+    try:
+        garantir_emendas()
+    except Exception as e:
+        print(f"Erro ao baixar emendas parlamentares: {e}")
+    print("Siconfi/DCA (por ano fiscal) e bases manuais entram no cruzar_socioeconomico.py.")
     baixar_ivs()
     print("Concluído. Arquivos em data/socioeconomico/")
 
