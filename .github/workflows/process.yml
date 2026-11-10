@@ -82,6 +82,9 @@ jobs:
       - name: Processar e gerar resultados (lê Parquet)
         run: python scripts/process_and_summarize.py
 
+      - name: Analisar fatores do residual
+        run: python scripts/residual_fatores.py
+
       - name: Commit resultados
         run: |
           git config user.name "github-actions[bot]"
