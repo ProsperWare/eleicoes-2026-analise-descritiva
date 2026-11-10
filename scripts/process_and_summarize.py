@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Calcula residual do modelo linear (T1 -> T2) e distribuição por faixa.
-Bins de 0.1 p.p. + regiões + residual por zona (MG).
+Residual do linear (T1->T2) + distribuição + residual por zona (todas UFs).
+Marca zonas com desvio em relação à normal esperada.
 """
 
 from pathlib import Path
@@ -98,12 +98,12 @@ def residual_distribuicao(train_clean, test_clean, features, col_t2, uf):
             "pct_dentro_5": round(100 * (residual.abs() <= 5).mean(), 2),
         }
 
-        # Residual com zona para agregação
-        res_df = test_clean[["NR_ZONA"]].copy() if "NR_ZONA" in test_clean.columns else None
-        if res_df is not None:
-            res_df = res_df.copy()
+        res_df = None
+        if "NR_ZONA" in test_clean.columns:
+            res_df = test_clean[["NR_ZONA"]].copy()
             res_df["residual"] = residual.values
             res_df = res_df.dropna(subset=["residual"])
+            res_df["uf"] = uf
         return info, dist, res_df
     except Exception as e:
         print(f"  residual {uf}: {e}")
@@ -118,7 +118,7 @@ def main():
 
     rows = []
     all_dist = []
-    zona_rows = []
+    all_zona = []
 
     for jf in join_files:
         uf = jf.stem.replace("join_", "")
@@ -153,9 +153,8 @@ def main():
             all_dist.append(dist)
             print(f"  n={info['n']} | dentro ±5pp={info['pct_dentro_5']}%")
 
-            # Agrega por zona se MG
-            if uf == "MG" and res_df is not None and "NR_ZONA" in res_df.columns:
-                zona_agg = res_df.groupby("NR_ZONA")["residual"].agg(
+            if res_df is not None and len(res_df) > 0:
+                zona_agg = res_df.groupby(["uf", "NR_ZONA"])["residual"].agg(
                     n="count",
                     res_medio="mean",
                     res_std="std",
@@ -164,8 +163,7 @@ def main():
                 zona_agg["res_medio"] = zona_agg["res_medio"].round(3)
                 zona_agg["res_std"] = zona_agg["res_std"].round(3)
                 zona_agg["pct_dentro_5"] = zona_agg["pct_dentro_5"].round(2)
-                zona_agg.to_csv(RESULTS / "residual_zona_MG.csv", index=False)
-                print(f"  Zonas MG: {len(zona_agg)}")
+                all_zona.append(zona_agg)
 
     if rows:
         with open(RESULTS / "residual_resumo.txt", "w", encoding="utf-8") as f:
@@ -191,7 +189,21 @@ def main():
             agg["densidade"] = agg["n"] / agg["n"].sum()
             agg.to_csv(RESULTS / f"residual_dist_regiao_{reg.replace(' ', '_')}.csv", index=False)
 
-    status = f"UFs processadas: {len(rows)}\n"
+    if all_zona:
+        zonas = pd.concat(all_zona, ignore_index=True)
+        zonas.to_csv(RESULTS / "residual_zona_todas.csv", index=False)
+
+        # Flag de desvio: |res_medio| > 1.5 ou pct_dentro_5 < 95 ou res_std > 3
+        desvio = zonas[
+            (zonas["res_medio"].abs() > 1.5) |
+            (zonas["pct_dentro_5"] < 95) |
+            (zonas["res_std"] > 3.0)
+        ].copy()
+        desvio = desvio.sort_values("res_medio", key=abs, ascending=False)
+        desvio.to_csv(RESULTS / "residual_zona_desvio.csv", index=False)
+        print(f"Zonas com desvio: {len(desvio)} de {len(zonas)}")
+
+    status = f"UFs processadas: {len(rows)}\nZonas totais: {len(zonas) if all_zona else 0}\n"
     (RESULTS / "status.txt").write_text(status, encoding="utf-8")
     print(status)
 
