@@ -1,2 +1,2 @@
 UFs processadas: 28
-Zonas totais: 2640
+Top 100 gerado
