@@ -9,9 +9,16 @@ Uso:
 """
 
 import argparse
+import functools
 import subprocess
 import sys
-from pathlib import Path
+
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
+print = functools.partial(print, flush=True)
 
 def run(cmd: list[str], desc: str):
     print(f"\n=== {desc} ===")

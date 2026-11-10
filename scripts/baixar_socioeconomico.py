@@ -27,6 +27,7 @@ import unicodedata
 import zipfile
 from datetime import datetime, timedelta
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -36,16 +37,176 @@ print = functools.partial(print, flush=True)
 DATA_SOCIO = Path("data/socioeconomico")
 DATA_SOCIO.mkdir(parents=True, exist_ok=True)
 
+_UF_POR_CODIGO_IBGE = {
+    11: "RO", 12: "AC", 13: "AM", 14: "RR", 15: "PA", 16: "AP", 17: "TO",
+    21: "MA", 22: "PI", 23: "CE", 24: "RN", 25: "PB", 26: "PE", 27: "AL", 28: "SE", 29: "BA",
+    31: "MG", 32: "ES", 33: "RJ", 35: "SP",
+    41: "PR", 42: "SC", 43: "RS",
+    50: "MS", 51: "MT", 52: "GO", 53: "DF",
+}
+
+
+def _coluna_por_nome(df: pd.DataFrame, *opcoes: str) -> str | None:
+    indice = {}
+    for coluna in df.columns:
+        chave = _sem_acento(str(coluna))
+        indice.setdefault(chave, coluna)
+        indice.setdefault(chave.replace(" ", ""), coluna)
+    for opcao in opcoes:
+        chave = _sem_acento(opcao)
+        if chave in indice:
+            return indice[chave]
+        if chave.replace(" ", "") in indice:
+            return indice[chave.replace(" ", "")]
+    return None
+
+
+def _numero_um(valor):
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return np.nan
+    if isinstance(valor, (int, float)) and not isinstance(valor, bool):
+        return float(valor)
+    texto = str(valor).strip()
+    if texto.lower() in {"", "nan", "none", "<na>"}:
+        return np.nan
+    if "," in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", texto) and (texto.count(".") > 1 or texto.endswith(".000")):
+        texto = texto.replace(".", "")
+    numero = pd.to_numeric(texto, errors="coerce")
+    return float(numero) if pd.notna(numero) else np.nan
+
+
+def _numero_flex(serie: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(serie):
+        return pd.to_numeric(serie, errors="coerce")
+    return serie.map(_numero_um)
+
+
+def _uf_sigla(valor) -> str:
+    texto = str(valor).strip()
+    if re.fullmatch(r"[A-Za-z]{2}", texto):
+        return texto.upper()
+    try:
+        codigo = int(float(texto))
+    except (TypeError, ValueError):
+        return texto.upper()
+    return _UF_POR_CODIGO_IBGE.get(codigo, texto.upper())
+
+
+def preparar_idh(df: pd.DataFrame) -> pd.DataFrame:
+    """Fica com o IDHM municipal de 2010 e o código IBGE de 7 dígitos (Codmun7)."""
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    col_ano = _coluna_por_nome(df, "ano")
+    col_ibge = _coluna_por_nome(df, "codmun7", "codigo_ibge", "cd_mun", "cod mun", "codmun6")
+    col_nome = _coluna_por_nome(df, "municipio", "nome municipio", "nome")
+    col_uf = _coluna_por_nome(df, "uf")
+    col_idhm = _coluna_por_nome(df, "idhm")
+    col_e = _coluna_por_nome(df, "idhm_e", "idhm e")
+    col_l = _coluna_por_nome(df, "idhm_l", "idhm l")
+    col_r = _coluna_por_nome(df, "idhm_r", "idhm r")
+    col_pop = _coluna_por_nome(df, "pop", "populacao")
+
+    if col_ano:
+        ano = pd.to_numeric(df[col_ano], errors="coerce")
+        if (ano == 2010).any():
+            df = df.loc[ano == 2010].copy()
+            ano_uso = 2010
+        else:
+            ano_uso = int(ano.max()) if ano.notna().any() else None
+            if ano_uso is not None:
+                df = df.loc[ano == ano_uso].copy()
+                print(f"AVISO: IDHM sem ano 2010; usando {ano_uso}")
+        if ano_uso is not None:
+            print(f"IDHM ano {ano_uso}: {len(df)} linhas")
+
+    saida = pd.DataFrame(index=df.index)
+    if col_ibge:
+        codigo = df[col_ibge].astype(str).str.replace(r"\.0$", "", regex=True).str.replace(r"\D", "", regex=True)
+        saida["codigo_ibge"] = codigo.map(lambda d: d.zfill(7) if d and len(d) != 6 else d)
+    if col_nome:
+        saida["municipio"] = df[col_nome].astype(str).str.strip()
+    if col_uf:
+        saida["uf"] = df[col_uf].map(_uf_sigla)
+    for destino, origem in (("idhm", col_idhm), ("idhm_e", col_e), ("idhm_l", col_l), ("idhm_r", col_r), ("pop", col_pop)):
+        if origem:
+            saida[destino] = _numero_flex(df[origem])
+    if col_ano and "ano" not in saida.columns:
+        saida["ano"] = pd.to_numeric(df[col_ano], errors="coerce")
+    saida = saida.dropna(how="all")
+    if "codigo_ibge" in saida.columns:
+        saida["codigo_ibge"] = saida["codigo_ibge"].replace("", pd.NA)
+        saida = saida.dropna(subset=["codigo_ibge"]).drop_duplicates("codigo_ibge")
+    return saida.reset_index(drop=True)
+
+
+def preparar_transferencias(df: pd.DataFrame) -> pd.DataFrame:
+    """Soma os decêndios (ou a coluna de valor) por município e UF.
+
+    No CSV do Tesouro Transparente a coluna 'Transferência' é o tipo (FPM, FUNDEB),
+    não o valor. O valor está em 1º/2º/3º Decêndio.
+    """
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    col_pronta = _coluna_por_nome(df, "transferencia_liquida", "transferencia liquida")
+    col_muni = _coluna_por_nome(df, "municipio", "nome municipio", "nome")
+    col_uf = _coluna_por_nome(df, "uf")
+    col_ibge = _coluna_por_nome(df, "codigo_ibge", "codmun7", "cd_mun")
+    col_siafi = _coluna_por_nome(df, "codigo_siafi", "siafi", "codigo municipio siafi")
+    if col_pronta:
+        saida = pd.DataFrame()
+        if col_muni:
+            saida["municipio"] = df[col_muni]
+        if col_uf:
+            saida["uf"] = df[col_uf].map(_uf_sigla)
+        saida["transferencia_liquida"] = _numero_flex(df[col_pronta])
+        if col_ibge:
+            saida["codigo_ibge"] = df[col_ibge]
+        if col_siafi:
+            saida["codigo_siafi"] = df[col_siafi]
+        chaves = [c for c in ("municipio", "uf", "codigo_ibge", "codigo_siafi") if c in saida.columns]
+        if not chaves:
+            return saida
+        return saida.groupby(chaves, dropna=False, as_index=False)["transferencia_liquida"].sum()
+
+    decendios = [c for c in df.columns if "decendio" in _sem_acento(c)]
+    col_valor = _coluna_por_nome(df, "valor")
+    if decendios:
+        total = sum((_numero_flex(df[c]).fillna(0) for c in decendios), start=0)
+        print(f"Transferências: soma de {len(decendios)} colunas de decêndio")
+    elif col_valor:
+        total = _numero_flex(df[col_valor]).fillna(0)
+    else:
+        print("AVISO: transferências sem coluna de valor nem decêndio; arquivo mantido como veio")
+        return df
+
+    saida = pd.DataFrame({"transferencia_liquida": total})
+    chaves = []
+    if col_muni:
+        saida["municipio"] = df[col_muni].astype(str).str.strip()
+        chaves.append("municipio")
+    if col_uf:
+        saida["uf"] = df[col_uf].map(_uf_sigla)
+        chaves.append("uf")
+    if col_ibge:
+        saida["codigo_ibge"] = df[col_ibge]
+        chaves.append("codigo_ibge")
+    if col_siafi:
+        saida["codigo_siafi"] = df[col_siafi]
+        chaves.append("codigo_siafi")
+    if not chaves:
+        return saida
+    return saida.groupby(chaves, dropna=False, as_index=False)["transferencia_liquida"].sum()
+
+
 def baixar_idh():
     url = "https://raw.githubusercontent.com/mauriciocramos/IDHM/master/municipal.csv"
     print(f"Baixando IDHM municipal (base 2010) de {url}")
     r = requests.get(url, timeout=60)
     r.raise_for_status()
-    df = pd.read_csv(io.StringIO(r.text), sep=";", encoding="utf-8", low_memory=False)
-    cols_uteis = [c for c in df.columns if c.lower() in ("cd_mun", "municipio", "uf", "idhm", "idhm_e", "idhm_l", "idhm_r", "pop")]
-    if not cols_uteis:
-        cols_uteis = df.columns[:8].tolist()
-    df_out = df[cols_uteis].copy()
+    df = pd.read_csv(io.StringIO(r.text), sep=";", encoding="utf-8", decimal=",", thousands=".", low_memory=False)
+    df_out = preparar_idh(df)
     out_path = DATA_SOCIO / "idh_municipios.csv"
     df_out.to_csv(out_path, index=False, encoding="utf-8")
     print(f"IDHM municipal (2010) salvo em {out_path} ({len(df_out)} municípios)")
@@ -58,13 +219,7 @@ def baixar_transferencias():
     r = requests.get(url, timeout=120)
     r.raise_for_status()
     df = pd.read_csv(io.StringIO(r.text), sep=";", encoding="latin1", low_memory=False)
-    if "Valor" in df.columns or "valor" in df.columns:
-        valor_col = "Valor" if "Valor" in df.columns else "valor"
-        muni_col = next((c for c in df.columns if "munic" in c.lower() or "nome" in c.lower()), df.columns[0])
-        agg = df.groupby(muni_col)[valor_col].sum().reset_index()
-        agg.columns = [muni_col, "transferencia_liquida"]
-    else:
-        agg = df
+    agg = preparar_transferencias(df)
     out_path = DATA_SOCIO / "transferencias_municipios.csv"
     agg.to_csv(out_path, index=False, encoding="utf-8")
     print(f"Transferências salvas em {out_path} ({len(agg)} registros)")
