@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Residual do linear (T1->T2) + top 100 urnas outliers.
+Residual do linear (T1->T2) + top 2% urnas outliers.
 """
 
 from pathlib import Path
@@ -152,12 +152,13 @@ def main():
     if all_urnas:
         urnas = pd.concat(all_urnas, ignore_index=True)
         urnas["abs_residual"] = urnas["residual"].abs()
-        top100 = urnas.nlargest(100, "abs_residual")
-        top100 = top100.round({"residual": 3, "previsto": 2, "observado": 2, "abs_residual": 3})
-        top100.to_csv(RESULTS / "top100_urnas_outliers.csv", index=False)
-        print(f"Top 100 urnas outliers salvas. Max residual abs: {top100['abs_residual'].max():.2f} p.p.")
+        n_top = max(1, int(len(urnas) * 0.02))
+        top_outliers = urnas.nlargest(n_top, "abs_residual")
+        top_outliers = top_outliers.round({"residual": 3, "previsto": 2, "observado": 2, "abs_residual": 3})
+        top_outliers.to_csv(RESULTS / "top2pct_urnas_outliers.csv", index=False)
+        print(f"Top 2% urnas outliers salvas ({n_top} urnas). Max residual abs: {top_outliers['abs_residual'].max():.2f} p.p.")
 
-    status = f"UFs processadas: {len(rows)}\nTop 100 gerado\n"
+    status = f"UFs processadas: {len(rows)}\nTop 2% gerado\n"
     (RESULTS / "status.txt").write_text(status, encoding="utf-8")
     print(status)
 
