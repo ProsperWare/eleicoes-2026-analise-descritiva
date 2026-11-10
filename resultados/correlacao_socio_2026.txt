@@ -11,27 +11,73 @@ Transferências: o CSV mensal do Tesouro não tem coluna de código (Município,
 O codigo_ibge usado no cruzamento é o do crosswalk (nome+UF, com DOeste/D'Oeste unificados).
 Se o arquivo trouxer código, ele é normalizado (sem '.0', SIAFI com zeros, IBGE de 6 dígitos casa nos 7).
 Municípios da UF ZZ (exterior) ficam fora do cruzamento e das correlações.
-Per capita usa a população do IDHM 2010 (coluna pop) quando existe.
+Per capita de IDH/Bolsa/transferência constitucional usa a pop do IDHM 2010.
+Per capita de gasto (Siconfi, emendas e bases locais) usa a população do Siconfi no ano do DCA e, se faltar, a pop do IDHM 2010.
+Legenda das variáveis de gasto:
+siconfi_despesa_total: despesas liquidadas exceto intraorçamentárias (Siconfi DCA Anexo I-E).
+siconfi_despesa_saude: função 10 Saúde, despesas liquidadas (DCA I-E).
+siconfi_despesa_educacao: função 12 Educação, despesas liquidadas (DCA I-E).
+siconfi_despesa_assistencia: função 08 Assistência Social, despesas liquidadas (DCA I-E).
+siconfi_despesa_urbanismo: função 15 Urbanismo, despesas liquidadas (DCA I-E).
+siconfi_receita_propria: impostos, taxas e contribuições de melhoria, receitas brutas (DCA I-C, 1.1.0.0.00.0.0).
+siconfi_receita_transferida: transferências correntes, receitas brutas (DCA I-C, 1.7.0.0.00.0.0).
+siconfi_receita_fundeb: FUNDEB recebido pelo município no DCA (1.7.5.8.01.0.0), não o arquivo de repasse do FNDE.
+siconfi_populacao: população informada pelo Siconfi no exercício do DCA.
+emendas_valor_pago_eleicao: soma do valor pago das emendas no ano da eleição (Portal da Transparência, EmendasParlamentares.csv).
+emendas_valor_pago_ano_anterior: idem, ano anterior à eleição.
+emendas_valor_pago_bienio: soma dos dois anos.
+siops_despesa: despesa SIOPS lida de arquivo local, se houver.
+siope_despesa: despesa SIOPE lida de arquivo local, se houver.
+fundeb_repasse: repasse FNDE/FUNDEB lido de arquivo local, se houver.
+convenio_valor: transferências voluntárias/convênios lidas de arquivo local, se houver.
+despesa_federal_valor: despesa federal por localidade lida de arquivo local agregado, se houver.
+Colunas *_pc: valor dividido pela população do Siconfi no ano do DCA, ou pela pop do IDHM 2010 se a do Siconfi faltar.
+Fontes não baixadas automaticamente: SIOPS, SIOPE, repasse FNDE/FUNDEB, Transferegov/convênios e despesa federal por localidade.
+Motivo: não há API em massa sem autenticação (ou o arquivo do portal é HTML/403 ou multi-GB). Se o CSV estiver em SOCIO_LOCAL_DIR, fora de raw/, ele entra.
 
-residual_mean_unweighted           0.993056
-transferencia_per_capita           0.042954
-bolsa_beneficiarios_por_eleitor    0.010894
-idhm_l                             0.004669
-idhm_r                            -0.004439
-n_eleitores                       -0.013748
-pop                               -0.013846
-n_comparecimento                  -0.013899
-n_secoes                          -0.014932
-bolsa_n_beneficiarios             -0.018799
-bolsa_valor_parcela               -0.018885
-bolsa_valor_per_capita            -0.020551
-transferencia_liquida             -0.022029
-bolsa_beneficiarios_por_hab       -0.022490
-idhm                              -0.024343
-idhm_e                            -0.045303
+residual_mean_unweighted              0.993056
+emendas_valor_pago_bienio_pc          0.095621
+emendas_valor_pago_eleicao_pc         0.078882
+emendas_valor_pago_ano_anterior_pc    0.059885
+transferencia_per_capita              0.042954
+siconfi_receita_transferida_pc        0.015570
+bolsa_beneficiarios_por_eleitor       0.010894
+idhm_l                                0.004669
+siconfi_despesa_educacao_pc           0.001759
+emendas_valor_pago_eleicao           -0.002013
+siconfi_receita_propria              -0.004015
+siconfi_despesa_saude_pc             -0.004303
+idhm_r                               -0.004439
+siconfi_despesa_total_pc             -0.007291
+n_eleitores                          -0.013748
+pop                                  -0.013846
+n_comparecimento                     -0.013899
+n_secoes                             -0.014932
+siconfi_despesa_urbanismo            -0.015718
+siconfi_receita_transferida          -0.016594
+siconfi_despesa_total                -0.018042
+bolsa_n_beneficiarios                -0.018799
+bolsa_valor_parcela                  -0.018885
+emendas_valor_pago_bienio            -0.020124
+bolsa_valor_per_capita               -0.020551
+siconfi_despesa_saude                -0.020696
+siconfi_despesa_educacao             -0.020818
+siconfi_despesa_assistencia          -0.021324
+transferencia_liquida                -0.022029
+bolsa_beneficiarios_por_hab          -0.022490
+siconfi_despesa_urbanismo_pc         -0.023591
+idhm                                 -0.024343
+emendas_valor_pago_ano_anterior      -0.025347
+siconfi_despesa_assistencia_pc       -0.029657
+idhm_e                               -0.045303
+siconfi_receita_propria_pc           -0.047443
+siconfi_receita_fundeb                     NaN
+siconfi_receita_fundeb_pc                  NaN
 
 N municípios: 5553
 Match crosswalk: {'codigo': 5552, 'sem_match': 1}
 Match IDHM: {'codigo': 5547, 'sem_match': 6}
 Match transferências: {'codigo': 5551, 'sem_match': 2}
 Match Bolsa Família: {'codigo': 5552, 'sem_match': 1}
+Match Siconfi: {'sem_match': 3179, 'codigo': 2374}
+Match emendas: {'sem_match': 4750, 'codigo': 803}
