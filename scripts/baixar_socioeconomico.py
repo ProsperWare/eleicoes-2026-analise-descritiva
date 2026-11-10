@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """
 Baixa e prepara bases oficiais para cruzamento socioeconômico:
-- IDHM municipal (base Atlas Brasil 2010, via GitHub público)
+- IDHM municipal (base Atlas Brasil — último censo completo 2010)
 - Transferências constitucionais mensais (Tesouro Transparente)
+
+Nota sobre IDHM:
+  O último IDHM municipal completo e público em CSV é o de 2010 (Censo).
+  O Radar IDHM 2024 (2012-2024, PNAD Contínua) cobre Brasil, UFs e Regiões
+  Metropolitanas, mas NÃO o nível municipal individual.
+  Fonte: https://www.atlasbrasil.org.br/ e PNUD Radar IDHM 2024.
 
 Salva em data/socioeconomico/
 """
@@ -16,9 +22,10 @@ DATA_SOCIO = Path("data/socioeconomico")
 DATA_SOCIO.mkdir(parents=True, exist_ok=True)
 
 def baixar_idh():
-    # Base pública do Atlas Brasil (IDHM 2010 e indicadores) — GitHub mauriciocramos/IDHM
+    # Base pública do Atlas Brasil (IDHM municipal 2010) — GitHub mauriciocramos/IDHM
+    # Este é o dataset municipal completo mais recente disponível em CSV direto.
     url = "https://raw.githubusercontent.com/mauriciocramos/IDHM/master/municipal.csv"
-    print(f"Baixando IDHM de {url}")
+    print(f"Baixando IDHM municipal (base 2010) de {url}")
     r = requests.get(url, timeout=60)
     r.raise_for_status()
     df = pd.read_csv(io.StringIO(r.text), sep=";", encoding="utf-8", low_memory=False)
@@ -29,11 +36,12 @@ def baixar_idh():
     df_out = df[cols_uteis].copy()
     out_path = DATA_SOCIO / "idh_municipios.csv"
     df_out.to_csv(out_path, index=False, encoding="utf-8")
-    print(f"IDHM salvo em {out_path} ({len(df_out)} municípios)")
+    print(f"IDHM municipal (2010) salvo em {out_path} ({len(df_out)} municípios)")
+    print("NOTA: Radar IDHM 2024 existe (PNAD 2012-2024) mas apenas para UF e RMs, não municipal.")
     return out_path
 
 def baixar_transferencias():
-    # CSV mensal mais recente do Tesouro Transparente (exemplo 202606)
+    # CSV mensal do Tesouro Transparente
     url = "https://www.tesourotransparente.gov.br/ckan/dataset/af4e7c47-2132-4d9a-bd7c-34e28a210b03/resource/315e91df-109d-41c2-b8c6-820eb3ffe0cd/download/transferenciamensalmunicipios202606.csv.csv"
     print(f"Baixando transferências de {url}")
     r = requests.get(url, timeout=120)
