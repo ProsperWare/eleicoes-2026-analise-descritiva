@@ -1,0 +1,10 @@
+Peso dos fatores no residual (Decision Tree)
+==================================================
+abstencao_rel                  0.7139
+QT_APTOS_t2                    0.1313
+QT_APTOS_t1                    0.1308
+QT_COMPARECIMENTO_t1           0.0240
+QT_COMPARECIMENTO_t2           0.0000
+
+R2 da árvore: 0.0029
+N urnas: 314952
