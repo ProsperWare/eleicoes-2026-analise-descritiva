@@ -71,6 +71,7 @@ def main():
             run([sys.executable, "scripts/intersecao_3anos.py"], "Interseção top 2% dos 3 anos")
             run([sys.executable, "scripts/detalhar_intersecao.py"], "Detalhar interseção")
             run([sys.executable, "scripts/top_positivos_negativos.py"], "Top positivos e negativos")
+            run([sys.executable, "scripts/ac_zona3_anos.py"], "Comparação zona 3 AC nos 3 anos")
 
     print("\nOrquestração concluída.")
 
