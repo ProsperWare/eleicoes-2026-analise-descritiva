@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Residual do linear (T1->T2) + distribuição + residual por zona (todas UFs).
-Marca zonas com desvio em relação à normal esperada.
+Residual do linear (T1->T2) + top 100 urnas outliers.
 """
 
 from pathlib import Path
@@ -81,16 +80,6 @@ def residual_distribuicao(train_clean, test_clean, features, col_t2, uf):
         pred = lin.predict(scaler.transform(X_te))
         residual = y_te - pred
 
-        bins = np.arange(-15, 15.1, 0.1)
-        counts, edges = np.histogram(residual.dropna(), bins=bins)
-        dist = pd.DataFrame({
-            "faixa_ini": edges[:-1].round(1),
-            "faixa_fim": edges[1:].round(1),
-            "n": counts,
-        })
-        dist = dist[dist["n"] > 0]
-        dist.to_csv(RESULTS / f"residual_dist_{uf}.csv", index=False)
-
         info = {
             "n": len(residual),
             "res_medio": round(float(residual.mean()), 3),
@@ -98,13 +87,15 @@ def residual_distribuicao(train_clean, test_clean, features, col_t2, uf):
             "pct_dentro_5": round(100 * (residual.abs() <= 5).mean(), 2),
         }
 
-        res_df = None
-        if "NR_ZONA" in test_clean.columns:
-            res_df = test_clean[["NR_ZONA"]].copy()
-            res_df["residual"] = residual.values
-            res_df = res_df.dropna(subset=["residual"])
-            res_df["uf"] = uf
-        return info, dist, res_df
+        # Identificadores da urna
+        id_cols = [c for c in ["NR_ZONA", "NR_SECAO", "QT_COMPARECIMENTO_t2", "QT_APTOS_t2"] if c in test_clean.columns]
+        res_df = test_clean[id_cols].copy() if id_cols else pd.DataFrame(index=test_clean.index)
+        res_df["residual"] = residual.values
+        res_df["previsto"] = pred
+        res_df["observado"] = y_te.values
+        res_df["uf"] = uf
+        res_df = res_df.dropna(subset=["residual"])
+        return info, None, res_df
     except Exception as e:
         print(f"  residual {uf}: {e}")
         return None, None, None
@@ -117,8 +108,7 @@ def main():
         return
 
     rows = []
-    all_dist = []
-    all_zona = []
+    all_urnas = []
 
     for jf in join_files:
         uf = jf.stem.replace("join_", "")
@@ -145,25 +135,11 @@ def main():
         if len(train_clean) < 30:
             continue
 
-        info, dist, res_df = residual_distribuicao(train_clean, test_clean, features, col_t2, uf)
-        if info and dist is not None:
+        info, _, res_df = residual_distribuicao(train_clean, test_clean, features, col_t2, uf)
+        if info and res_df is not None and len(res_df) > 0:
             rows.append({"uf": uf, **info})
-            dist = dist.copy()
-            dist["uf"] = uf
-            all_dist.append(dist)
+            all_urnas.append(res_df)
             print(f"  n={info['n']} | dentro ±5pp={info['pct_dentro_5']}%")
-
-            if res_df is not None and len(res_df) > 0:
-                zona_agg = res_df.groupby(["uf", "NR_ZONA"])["residual"].agg(
-                    n="count",
-                    res_medio="mean",
-                    res_std="std",
-                    pct_dentro_5=lambda x: 100 * (x.abs() <= 5).mean(),
-                ).reset_index()
-                zona_agg["res_medio"] = zona_agg["res_medio"].round(3)
-                zona_agg["res_std"] = zona_agg["res_std"].round(3)
-                zona_agg["pct_dentro_5"] = zona_agg["pct_dentro_5"].round(2)
-                all_zona.append(zona_agg)
 
     if rows:
         with open(RESULTS / "residual_resumo.txt", "w", encoding="utf-8") as f:
@@ -173,37 +149,15 @@ def main():
             for r in rows:
                 f.write(f"{r['uf']:<6} {r['n']:>8} {r['res_medio']:>8} {r['res_std']:>8} {r['pct_dentro_5']:>8}\n")
 
-    if all_dist:
-        full = pd.concat(all_dist, ignore_index=True)
-        nacional = full.groupby(["faixa_ini", "faixa_fim"])["n"].sum().reset_index()
-        nacional["densidade"] = nacional["n"] / nacional["n"].sum()
-        nacional.to_csv(RESULTS / "residual_dist_nacional.csv", index=False)
+    if all_urnas:
+        urnas = pd.concat(all_urnas, ignore_index=True)
+        urnas["abs_residual"] = urnas["residual"].abs()
+        top100 = urnas.nlargest(100, "abs_residual")
+        top100 = top100.round({"residual": 3, "previsto": 2, "observado": 2, "abs_residual": 3})
+        top100.to_csv(RESULTS / "top100_urnas_outliers.csv", index=False)
+        print(f"Top 100 urnas outliers salvas. Max residual abs: {top100['abs_residual'].max():.2f} p.p.")
 
-        uf_to_regiao = {u: reg for reg, ufs in REGIOES.items() for u in ufs}
-        full["regiao"] = full["uf"].map(uf_to_regiao)
-        for reg in REGIOES.keys():
-            sub = full[full["regiao"] == reg]
-            if len(sub) == 0:
-                continue
-            agg = sub.groupby(["faixa_ini", "faixa_fim"])["n"].sum().reset_index()
-            agg["densidade"] = agg["n"] / agg["n"].sum()
-            agg.to_csv(RESULTS / f"residual_dist_regiao_{reg.replace(' ', '_')}.csv", index=False)
-
-    if all_zona:
-        zonas = pd.concat(all_zona, ignore_index=True)
-        zonas.to_csv(RESULTS / "residual_zona_todas.csv", index=False)
-
-        # Flag de desvio: |res_medio| > 1.5 ou pct_dentro_5 < 95 ou res_std > 3
-        desvio = zonas[
-            (zonas["res_medio"].abs() > 1.5) |
-            (zonas["pct_dentro_5"] < 95) |
-            (zonas["res_std"] > 3.0)
-        ].copy()
-        desvio = desvio.sort_values("res_medio", key=abs, ascending=False)
-        desvio.to_csv(RESULTS / "residual_zona_desvio.csv", index=False)
-        print(f"Zonas com desvio: {len(desvio)} de {len(zonas)}")
-
-    status = f"UFs processadas: {len(rows)}\nZonas totais: {len(zonas) if all_zona else 0}\n"
+    status = f"UFs processadas: {len(rows)}\nTop 100 gerado\n"
     (RESULTS / "status.txt").write_text(status, encoding="utf-8")
     print(status)
 
