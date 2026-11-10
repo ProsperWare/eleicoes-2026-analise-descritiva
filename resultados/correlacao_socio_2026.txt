@@ -1,0 +1,33 @@
+Correlações com residual_mean (2026)
+==================================================
+residual_mean é a média municipal do residual de seção (observado − previsto, p.p.),
+ponderada por QT_COMPARECIMENTO_t2. residual_mean_unweighted é a média simples.
+O residual é o de process_and_summarize.residual_distribuicao (regressão linear T1→T2,
+seções de teste com NR_SECAO não múltiplo de 3).
+Bolsa Família: mes_referencia mais recente de cada município, não a média dos meses.
+Crosswalk: betafcc/Municipios-Brasileiros-TSE + kelvins/municipios-brasileiros (SIAFI),
+arquivo data/referencia/municipios_tse_ibge_siafi.csv.
+Per capita usa a população do IDHM 2010 (coluna pop) quando existe.
+
+residual_mean_unweighted           0.994789
+transferencia_per_capita           0.045209
+bolsa_beneficiarios_por_eleitor    0.010894
+idhm_l                             0.004669
+idhm_r                            -0.004439
+n_eleitores                       -0.011056
+n_comparecimento                  -0.011248
+n_secoes                          -0.012116
+pop                               -0.013846
+bolsa_n_beneficiarios             -0.018799
+bolsa_valor_parcela               -0.018885
+bolsa_valor_per_capita            -0.020551
+transferencia_liquida             -0.022055
+bolsa_beneficiarios_por_hab       -0.022490
+idhm                              -0.024343
+idhm_e                            -0.045303
+
+N municípios: 5657
+Match crosswalk: {'codigo': 5552, 'sem_match': 105}
+Match IDHM: {'codigo': 5547, 'sem_match': 110}
+Match transferências: {'nome': 5488, 'sem_match': 169}
+Match Bolsa Família: {'codigo': 5552, 'sem_match': 105}
