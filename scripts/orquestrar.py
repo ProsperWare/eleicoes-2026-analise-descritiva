@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--skip-download", action="store_true", help="Pula todos os downloads")
     parser.add_argument("--skip-preprocess", action="store_true", help="Pula pré-processamento")
     parser.add_argument("--skip-residual", action="store_true", help="Pula cálculo de residual")
+    parser.add_argument("--skip-socio", action="store_true", help="Pula cruzamento socioeconômico (IDH + transferências)")
     args = parser.parse_args()
 
     anos = [a.strip() for a in args.anos]
@@ -72,6 +73,12 @@ def main():
             run([sys.executable, "scripts/detalhar_intersecao.py"], "Detalhar interseção")
             run([sys.executable, "scripts/top_positivos_negativos.py"], "Top positivos e negativos")
             run([sys.executable, "scripts/ac_zona3_anos.py"], "Comparação zona 3 AC nos 3 anos")
+
+    # Cruzamento socioeconômico (IDH + transferências federais)
+    if not args.skip_socio:
+        for ano in anos:
+            if ano in ("2026", "2022", "2018"):
+                run([sys.executable, "scripts/cruzar_socioeconomico.py", "--ano", ano], f"Cruzamento socioeconômico {ano}")
 
     print("\nOrquestração concluída.")
 
