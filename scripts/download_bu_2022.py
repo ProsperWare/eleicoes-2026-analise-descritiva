@@ -4,6 +4,7 @@ Download Boletins de Urna (BU) oficiais das Eleições 2022 do TSE.
 Fonte: https://dadosabertos.tse.jus.br/dataset/resultados-2022-boletim-de-urna
 
 Os arquivos são CSVs por UF e turno. Coloque-os em data/raw/2022/.
+Valida se o arquivo baixado parece um CSV válido.
 """
 
 import urllib.request
@@ -29,10 +30,22 @@ RESOURCES = {
     "PI": {"1t": "a01fabe5-1478-4e2c-b65c-835c165b9fc5", "2t": "a9973da0-3c69-4c1c-9f40-1767d9a7f6ad"},
     "PR": {"1t": "55bd5c37-369c-43b1-afa1-3d9cd0d51ffe", "2t": "e16f0285-8a5f-4625-adea-d949f16cc494"},
     "RJ": {"1t": "b1e24aec-ffce-4ffe-bcfb-37f8700ac7e5", "2t": "d5777bab-250c-45cc-bd7f-be539d7a320c"},
-    # Complete as demais se necessário
 }
 
 BASE = "https://dadosabertos.tse.jus.br/dataset/resultados-2022-boletim-de-urna/resource"
+
+def is_valid_csv(path: Path) -> bool:
+    if not path.exists() or path.stat().st_size < 1000:
+        return False
+    try:
+        with open(path, "rb") as f:
+            head = f.read(500).decode("utf-8", errors="ignore").lower()
+            # Rejeita HTML e aceita se tiver ; e colunas típicas
+            if "<html" in head or "<!doctype" in head:
+                return False
+            return ";" in head and any(x in head for x in ("cd_cargo", "qt_votos", "nr_secao", "sg_uf"))
+    except Exception:
+        return False
 
 def download_resource(resource_id: str, dest: Path):
     url = f"{BASE}/{resource_id}/download"
@@ -46,14 +59,21 @@ def main():
         for turn, rid in turns.items():
             name = f"bu_2022_{turn}_{uf}.csv"
             dest = raw / name
-            if not dest.exists():
-                try:
-                    download_resource(rid, dest)
-                except Exception as e:
-                    print(f"  Falha em {uf} {turn}: {e}")
-            else:
-                print(f"Já existe: {dest}")
-    print("Download 2022 concluído (parcial).")
+            if dest.exists() and is_valid_csv(dest):
+                print(f"Já válido: {dest}")
+                continue
+            try:
+                if dest.exists():
+                    print(f"Arquivo inválido, rebaixando: {dest}")
+                    dest.unlink()
+                download_resource(rid, dest)
+                if is_valid_csv(dest):
+                    print(f"  OK: {dest} ({dest.stat().st_size} bytes)")
+                else:
+                    print(f"  AVISO: {dest} não parece CSV válido após download")
+            except Exception as e:
+                print(f"  Falha em {uf} {turn}: {e}")
+    print("Download 2022 concluído.")
 
 if __name__ == "__main__":
     main()
