@@ -69,31 +69,8 @@ jobs:
             echo "data/raw já tem conteúdo, mantendo"
           fi
 
-      - name: Download BUs 2026 (só o que falta)
-        run: |
-          python scripts/download_bu.py --all
-        continue-on-error: true
-
-      - name: Download BUs 2018
-        run: python scripts/download_bu_2018.py
-        continue-on-error: true
-
-      - name: Download BUs 2022
-        run: python scripts/download_bu_2022.py
-        continue-on-error: true
-
-      - name: Download logs da urna (2º turno)
-        run: python scripts/download_logs.py
-        continue-on-error: true
-
-      - name: Pré-processar BUs (agrega e salva Parquet — só reprocessa se necessário)
-        run: python scripts/preprocess_bu.py
-
-      - name: Processar e gerar resultados (lê Parquet)
-        run: python scripts/process_and_summarize.py
-
-      - name: Analisar fatores do residual
-        run: python scripts/residual_fatores.py
+      - name: Orquestrar processamento
+        run: python scripts/orquestrar.py --anos 2026 2022 2018
 
       - name: Commit resultados
         run: |
