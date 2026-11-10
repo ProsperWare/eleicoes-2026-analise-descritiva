@@ -2,13 +2,19 @@
 """
 Pré-processa BUs: agrega por seção e faz join T1×T2 por UF.
 Salva resultados em /home/alexa/eleicoes-data/processed/ como Parquet.
+
+Uso:
+  python scripts/preprocess_bu.py --ano 2026
+  python scripts/preprocess_bu.py --ano 2022
+  python scripts/preprocess_bu.py --ano 2018
 """
 
+import argparse
 import zipfile
 from pathlib import Path
 import pandas as pd
 
-RAW = Path("/home/alexa/eleicoes-data/raw")
+RAW_BASE = Path("/home/alexa/eleicoes-data/raw")
 PROCESSED = Path("/home/alexa/eleicoes-data/processed")
 PROCESSED.mkdir(exist_ok=True)
 
@@ -32,6 +38,14 @@ def load_bu_zip(zip_path: Path) -> pd.DataFrame:
                     continue
             raise ValueError(f"Falha ao ler {csv_name}")
 
+def load_bu_csv(csv_path: Path) -> pd.DataFrame:
+    for enc in ("utf-8", "latin-1", "cp1252"):
+        try:
+            return pd.read_csv(csv_path, sep=";", encoding=enc, low_memory=False, dtype=str)
+        except Exception:
+            continue
+    raise ValueError(f"Falha ao ler {csv_path}")
+
 def to_numeric_safe(s):
     return pd.to_numeric(s, errors="coerce").fillna(0)
 
@@ -47,7 +61,6 @@ def detect_columns(df: pd.DataFrame) -> dict:
         if c in cols:
             votos_col = c
             break
-    # fallback: qualquer coluna com VOTO no nome
     if not votos_col:
         for c in cols:
             if "VOTO" in c.upper() and "QT_" in c.upper():
@@ -60,14 +73,11 @@ def extract_cargo_pcts(df: pd.DataFrame, keys: list, cargo_code: str, top_n: int
     cargo_col = detected["cargo"]
     votos_col = detected["votos"]
     if not cargo_col or not votos_col:
-        print(f"    [DEBUG] Colunas não detectadas. cargo={cargo_col} votos={votos_col}")
-        print(f"    Colunas com CARGO/VOTO/QT: {[c for c in df.columns if any(x in c.upper() for x in ['CARGO','VOTO','QT_'])]}")
         return pd.DataFrame()
     df = df.copy()
     df[cargo_col] = df[cargo_col].astype(str).str.strip().str.lstrip("0")
     work = df[df[cargo_col] == cargo_code].copy()
     if work.empty:
-        print(f"    [DEBUG] Cargo {cargo_code} vazio em {cargo_col}. Únicos: {df[cargo_col].unique()[:8]}")
         return pd.DataFrame()
     work[votos_col] = to_numeric_safe(work[votos_col])
     totals = work.groupby(keys)[votos_col].sum().reset_index().rename(columns={votos_col: "TOTAL_VOTOS"})
@@ -105,29 +115,23 @@ def aggregate_section(df: pd.DataFrame, label: str) -> pd.DataFrame:
             tmp = df.groupby(keys)[col].first().reset_index()
             tmp[col] = to_numeric_safe(tmp[col])
             agg = agg.merge(tmp, on=keys, how="left")
-    is_t2 = "2t" in label.lower()
+    is_t2 = "2t" in label.lower() or "_2t_" in label.lower()
     if is_t2:
         pcts = extract_cargo_pcts(df, keys, "1", top_n=2, prefix="T2_")
         if not pcts.empty:
             agg = agg.merge(pcts, on=keys, how="left")
-            print(f"    T2: {len([c for c in pcts.columns if c.startswith('PCT_')])} colunas PCT")
-        else:
-            print(f"    T2: nenhuma coluna PCT gerada")
     else:
         for cargo, prefix, top in [("1", "PRES_", 3), ("3", "GOV_", 2), ("5", "SEN_", 2), ("6", "DEP_", 2)]:
             pcts = extract_cargo_pcts(df, keys, cargo, top_n=top, prefix=prefix)
             if not pcts.empty:
                 agg = agg.merge(pcts, on=keys, how="left")
-                print(f"    Cargo {cargo}: {len([c for c in pcts.columns if c.startswith('PCT_')])} colunas PCT")
-            else:
-                print(f"    Cargo {cargo}: nenhuma coluna PCT")
     agg["origem"] = label
     return agg
 
-def needs_rebuild(zip_path: Path, parquet_path: Path) -> bool:
+def needs_rebuild(src_path: Path, parquet_path: Path) -> bool:
     if not parquet_path.exists():
         return True
-    return zip_path.stat().st_mtime > parquet_path.stat().st_mtime
+    return src_path.stat().st_mtime > parquet_path.stat().st_mtime
 
 def force_suffix(df: pd.DataFrame, suffix: str, keys: list) -> pd.DataFrame:
     rename = {}
@@ -136,27 +140,33 @@ def force_suffix(df: pd.DataFrame, suffix: str, keys: list) -> pd.DataFrame:
             rename[c] = f"{c}{suffix}"
     return df.rename(columns=rename)
 
-def main():
-    zips = sorted(RAW.glob("bweb_*.zip"))
-    print(f"Zips encontrados: {len(zips)}")
-    if not zips:
-        print("Nenhum zip")
+def process_year(ano: str):
+    print(f"\n=== Processando ano {ano} ===")
+    if ano == "2026":
+        raw_dir = RAW_BASE
+        files = sorted(raw_dir.glob("bweb_*.zip"))
+        loader = load_bu_zip
+    else:
+        raw_dir = RAW_BASE / ano
+        files = sorted(raw_dir.glob("bu_*.csv"))
+        loader = load_bu_csv
+
+    if not files:
+        print(f"Nenhum arquivo encontrado para {ano} em {raw_dir}")
         return
 
     section_dfs = {}
-    rebuilt = 0
-    for zp in zips:
-        label = zp.stem
+    for f in files:
+        label = f.stem
         parquet_path = PROCESSED / f"{label}.parquet"
-        if needs_rebuild(zp, parquet_path):
-            print(f"Reprocessando {zp.name}...")
+        if needs_rebuild(f, parquet_path):
+            print(f"Reprocessando {f.name}...")
             try:
-                raw = load_bu_zip(zp)
+                raw = loader(f)
                 sec = aggregate_section(raw, label)
                 sec.to_parquet(parquet_path, index=False)
                 section_dfs[label] = sec
-                rebuilt += 1
-                print(f"  -> {len(sec)} seções salvas | colunas: {len(sec.columns)}")
+                print(f"  -> {len(sec)} seções")
             except Exception as e:
                 print(f"  ERRO: {e}")
         else:
@@ -166,16 +176,17 @@ def main():
             except Exception as e:
                 print(f"  Erro ao ler cache: {e}")
 
-    # Join T1 x T2 por UF e salva
-    t1_keys = [k for k in section_dfs if "1t" in k]
-    t2_keys = [k for k in section_dfs if "2t" in k]
-    print(f"\nJoins: {len(t1_keys)} T1")
+    # Join T1 x T2 por UF
+    t1_keys = [k for k in section_dfs if "1t" in k.lower()]
+    t2_keys = [k for k in section_dfs if "2t" in k.lower()]
     for t1k in t1_keys:
-        uf = t1k.split("_")[2] if "_" in t1k else "?"
+        # Extrai UF do nome do arquivo
+        parts = t1k.split("_")
+        uf = parts[-1] if len(parts) > 1 else "?"
         t2k = next((k for k in t2_keys if uf in k), None)
         if not t2k:
             continue
-        join_path = PROCESSED / f"join_{uf}.parquet"
+        join_path = PROCESSED / f"join_{ano}_{uf}.parquet"
         df1 = section_dfs[t1k]
         df2 = section_dfs[t2k]
         keys = [c for c in SECTION_KEYS if c in df1.columns and c in df2.columns]
@@ -188,11 +199,14 @@ def main():
             merged["diff_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] - merged["QT_COMPARECIMENTO_t1"]
             merged["razao_comparecimento"] = merged["QT_COMPARECIMENTO_t2"] / merged["QT_COMPARECIMENTO_t1"].replace(0, pd.NA)
         merged.to_parquet(join_path, index=False)
-        pct_cols = [c for c in merged.columns if c.startswith("PCT_")]
-        print(f"  Join {uf}: {len(merged)} seções | {len(pct_cols)} colunas PCT")
+        print(f"  Join {ano}_{uf}: {len(merged)} seções")
 
-    print(f"\nPré-processamento concluído. Reconstruídos: {rebuilt} arquivos.")
-    print(f"Dados em {PROCESSED}")
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ano", required=True, choices=["2026", "2022", "2018"])
+    args = parser.parse_args()
+    process_year(args.ano)
+    print(f"\nPré-processamento de {args.ano} concluído.")
 
 if __name__ == "__main__":
     main()
