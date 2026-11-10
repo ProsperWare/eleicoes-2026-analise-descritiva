@@ -9,8 +9,6 @@ on:
       - 'requirements.txt'
   workflow_dispatch:
 
-# Runner único: pushes seguidos no mesmo ref cancelam a run anterior
-# e deixam só a mais recente seguir.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -74,6 +72,10 @@ jobs:
       - name: Download BUs (só o que falta)
         run: |
           python scripts/download_bu.py --all
+        continue-on-error: true
+
+      - name: Download logs da urna (2º turno)
+        run: python scripts/download_logs.py
         continue-on-error: true
 
       - name: Pré-processar BUs (agrega e salva Parquet — só reprocessa se necessário)
