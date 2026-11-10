@@ -53,6 +53,9 @@ def main():
         if "2026" in anos:
             run([sys.executable, "scripts/download_logs.py"], "Download logs 2026")
 
+        # Bases socioeconômicas (IDH + transferências)
+        run([sys.executable, "scripts/baixar_socioeconomico.py"], "Download bases socioeconômicas (IDH + transferências)")
+
     # Diagnóstico
     if "2018" in anos or "2022" in anos:
         run([sys.executable, "scripts/diagnostico_csv.py"], "Diagnóstico CSVs 2018/2022")
