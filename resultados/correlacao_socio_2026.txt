@@ -7,27 +7,31 @@ seções de teste com NR_SECAO não múltiplo de 3).
 Bolsa Família: mes_referencia mais recente de cada município, não a média dos meses.
 Crosswalk: betafcc/Municipios-Brasileiros-TSE + kelvins/municipios-brasileiros (SIAFI),
 arquivo data/referencia/municipios_tse_ibge_siafi.csv.
+Transferências: o CSV mensal do Tesouro não tem coluna de código (Município, UF, decêndios, tipo).
+O codigo_ibge usado no cruzamento é o do crosswalk (nome+UF, com DOeste/D'Oeste unificados).
+Se o arquivo trouxer código, ele é normalizado (sem '.0', SIAFI com zeros, IBGE de 6 dígitos casa nos 7).
+Municípios da UF ZZ (exterior) ficam fora do cruzamento e das correlações.
 Per capita usa a população do IDHM 2010 (coluna pop) quando existe.
 
-residual_mean_unweighted           0.994789
-transferencia_per_capita           0.045209
+residual_mean_unweighted           0.993056
+transferencia_per_capita           0.042954
 bolsa_beneficiarios_por_eleitor    0.010894
 idhm_l                             0.004669
 idhm_r                            -0.004439
-n_eleitores                       -0.011056
-n_comparecimento                  -0.011248
-n_secoes                          -0.012116
+n_eleitores                       -0.013748
 pop                               -0.013846
+n_comparecimento                  -0.013899
+n_secoes                          -0.014932
 bolsa_n_beneficiarios             -0.018799
 bolsa_valor_parcela               -0.018885
 bolsa_valor_per_capita            -0.020551
-transferencia_liquida             -0.022055
+transferencia_liquida             -0.022029
 bolsa_beneficiarios_por_hab       -0.022490
 idhm                              -0.024343
 idhm_e                            -0.045303
 
-N municípios: 5657
-Match crosswalk: {'codigo': 5552, 'sem_match': 105}
-Match IDHM: {'codigo': 5547, 'sem_match': 110}
-Match transferências: {'nome': 5488, 'sem_match': 169}
-Match Bolsa Família: {'codigo': 5552, 'sem_match': 105}
+N municípios: 5553
+Match crosswalk: {'codigo': 5552, 'sem_match': 1}
+Match IDHM: {'codigo': 5547, 'sem_match': 6}
+Match transferências: {'codigo': 5551, 'sem_match': 2}
+Match Bolsa Família: {'codigo': 5552, 'sem_match': 1}

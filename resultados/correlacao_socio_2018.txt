@@ -7,6 +7,10 @@ seções de teste com NR_SECAO não múltiplo de 3).
 Bolsa Família: mes_referencia mais recente de cada município, não a média dos meses.
 Crosswalk: betafcc/Municipios-Brasileiros-TSE + kelvins/municipios-brasileiros (SIAFI),
 arquivo data/referencia/municipios_tse_ibge_siafi.csv.
+Transferências: o CSV mensal do Tesouro não tem coluna de código (Município, UF, decêndios, tipo).
+O codigo_ibge usado no cruzamento é o do crosswalk (nome+UF, com DOeste/D'Oeste unificados).
+Se o arquivo trouxer código, ele é normalizado (sem '.0', SIAFI com zeros, IBGE de 6 dígitos casa nos 7).
+Municípios da UF ZZ (exterior) ficam fora do cruzamento e das correlações.
 Per capita usa a população do IDHM 2010 (coluna pop) quando existe.
 
 residual_mean_unweighted           0.991330
@@ -20,14 +24,14 @@ n_eleitores                       -0.001947
 n_secoes                          -0.002068
 bolsa_valor_parcela               -0.002762
 bolsa_n_beneficiarios             -0.002863
-transferencia_liquida             -0.005291
+transferencia_liquida             -0.005402
 idhm_e                            -0.005904
-transferencia_per_capita          -0.017511
+transferencia_per_capita          -0.016977
 bolsa_beneficiarios_por_hab       -0.031156
 bolsa_valor_per_capita            -0.031566
 
 N municípios: 5395
 Match crosswalk: {'codigo': 5395}
 Match IDHM: {'codigo': 5390, 'sem_match': 5}
-Match transferências: {'nome': 5334, 'sem_match': 61}
+Match transferências: {'codigo': 5394, 'sem_match': 1}
 Match Bolsa Família: {'codigo': 5395}
