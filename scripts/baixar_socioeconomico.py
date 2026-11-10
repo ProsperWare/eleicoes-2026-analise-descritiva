@@ -3,7 +3,7 @@
 Baixa e prepara bases oficiais para cruzamento socioeconômico:
 - IDHM municipal (base Atlas Brasil — último censo completo 2010)
 - Transferências constitucionais mensais (Tesouro Transparente)
-- Bolsa Família / Novo Bolsa Família (Portal da Transparência)
+- Bolsa Família / Novo Bolsa Família (Portal da Transparência) — com ajuste automático de data
 - Nota sobre IVS (Ipea)
 
 Nota sobre IDHM:
@@ -18,12 +18,12 @@ from pathlib import Path
 import requests
 import pandas as pd
 import io
+from datetime import datetime, timedelta
 
 DATA_SOCIO = Path("data/socioeconomico")
 DATA_SOCIO.mkdir(parents=True, exist_ok=True)
 
 def baixar_idh():
-    # Base pública do Atlas Brasil (IDHM municipal 2010) — GitHub mauriciocramos/IDHM
     url = "https://raw.githubusercontent.com/mauriciocramos/IDHM/master/municipal.csv"
     print(f"Baixando IDHM municipal (base 2010) de {url}")
     r = requests.get(url, timeout=60)
@@ -57,39 +57,60 @@ def baixar_transferencias():
     print(f"Transferências salvas em {out_path} ({len(agg)} registros)")
     return out_path
 
+def gerar_meses_recentes(n_meses: int = 12) -> list[str]:
+    """Gera lista de YYYYMM dos últimos n meses (do mais recente para o mais antigo)."""
+    hoje = datetime.now()
+    meses = []
+    for i in range(n_meses):
+        data = hoje - timedelta(days=30 * i)
+        meses.append(data.strftime("%Y%m"))
+    return meses
+
 def baixar_bolsa_familia():
-    # Novo Bolsa Família — Portal da Transparência (exemplo mês recente)
-    # Padrão: https://portaldatransparencia.gov.br/download-de-dados/novo-bolsa-familia/YYYYMM
-    url = "https://portaldatransparencia.gov.br/download-de-dados/novo-bolsa-familia/202506"
-    print(f"Baixando Bolsa Família de {url}")
-    try:
-        r = requests.get(url, timeout=120)
-        r.raise_for_status()
-        # O portal retorna CSV direto ou zip; aqui assumimos CSV
-        df = pd.read_csv(io.StringIO(r.text), sep=";", encoding="latin1", low_memory=False)
-        # Agrega por município se possível
-        muni_col = next((c for c in df.columns if "munic" in c.lower() or "ibge" in c.lower() or "codigo" in c.lower()), None)
-        valor_col = next((c for c in df.columns if "valor" in c.lower() or "qtd" in c.lower()), None)
-        if muni_col and valor_col:
-            agg = df.groupby(muni_col)[valor_col].sum().reset_index()
-            agg.columns = [muni_col, "bolsa_familia_valor_ou_qtd"]
-        else:
-            agg = df
-        out_path = DATA_SOCIO / "bolsa_familia_municipios.csv"
-        agg.to_csv(out_path, index=False, encoding="utf-8")
-        print(f"Bolsa Família salva em {out_path} ({len(agg)} registros)")
-        return out_path
-    except Exception as e:
-        print(f"Erro ao baixar Bolsa Família: {e}")
-        print("Dica: verifique o mês disponível em https://portaldatransparencia.gov.br/download-de-dados/novo-bolsa-familia")
-        return None
+    """Tenta baixar Bolsa Família testando meses recentes automaticamente."""
+    meses = gerar_meses_recentes(12)
+    print(f"Tentando Bolsa Família nos meses: {meses[:6]}...")
+
+    for yyyymm in meses:
+        url = f"https://portaldatransparencia.gov.br/download-de-dados/novo-bolsa-familia/{yyyymm}"
+        print(f"  Tentando {yyyymm}...")
+        try:
+            r = requests.get(url, timeout=90)
+            if r.status_code != 200:
+                print(f"    HTTP {r.status_code}")
+                continue
+            # Tenta ler como CSV
+            df = pd.read_csv(io.StringIO(r.text), sep=";", encoding="latin1", low_memory=False)
+            if len(df) < 10:
+                print("    Arquivo muito pequeno, ignorando")
+                continue
+
+            # Agrega por município
+            muni_col = next((c for c in df.columns if any(x in c.lower() for x in ["munic", "ibge", "codigo"])), None)
+            valor_col = next((c for c in df.columns if any(x in c.lower() for x in ["valor", "qtd", "quantidade"])), None)
+
+            if muni_col and valor_col:
+                agg = df.groupby(muni_col)[valor_col].sum().reset_index()
+                agg.columns = [muni_col, "bolsa_familia_valor_ou_qtd"]
+            else:
+                agg = df
+
+            out_path = DATA_SOCIO / "bolsa_familia_municipios.csv"
+            agg.to_csv(out_path, index=False, encoding="utf-8")
+            print(f"  Sucesso com {yyyymm}! Salvo em {out_path} ({len(agg)} registros)")
+            return out_path
+
+        except Exception as e:
+            print(f"    Erro: {e}")
+            continue
+
+    print("Nenhum mês recente funcionou. Verifique manualmente em https://portaldatransparencia.gov.br/download-de-dados/novo-bolsa-familia")
+    return None
 
 def baixar_ivs():
-    # IVS municipal completo é principalmente base 2010 (Censo).
-    # Dados mais recentes (PNAD) estão em nível de UF no Ipeadata.
     print("IVS: base municipal completa disponível é de 2010.")
     print("Acesse https://ivs.ipea.gov.br/ ou dados.gov.br para download manual do XLSX municipal.")
-    print("Para análise municipal, use o arquivo idh_municipios.csv (que já traz indicadores correlatos) ou baixe manualmente.")
+    print("Para análise municipal, use o arquivo idh_municipios.csv ou baixe manualmente.")
 
 def main():
     print("Baixando bases socioeconômicas...")
