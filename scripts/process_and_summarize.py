@@ -166,7 +166,12 @@ def comparar_anos(anos):
     # Chave de identificação da seção
     keys = ["SG_UF", "CD_MUNICIPIO", "NR_ZONA", "NR_SECAO"]
     lines = ["=== Comparação Top 2% entre anos ===\n"]
-    for a1, a2 in [("2018", "2022"), ("2022", "2026"), ("2018", "2026")]:
+    pares = []
+    for i, a1 in enumerate(anos):
+        for a2 in anos[i + 1:]:
+            pares.append((str(a1), str(a2)))
+
+    for a1, a2 in pares:
         if a1 in tops and a2 in tops:
             t1 = tops[a1]
             t2 = tops[a2]

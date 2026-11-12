@@ -4,6 +4,7 @@ Orquestrador: decide quais scripts de download e processamento executar.
 
 Uso:
   python scripts/orquestrar.py --anos 2026 2022 2018
+  python scripts/orquestrar.py --anos 2014 2018 2022 2026
   python scripts/orquestrar.py --anos 2022 --skip-download
   python scripts/orquestrar.py --anos 2026 --ufs SP MG
   python scripts/orquestrar.py --anos 2026 2022 2018 --skip-benchmark
@@ -31,7 +32,7 @@ def run(cmd: list[str], desc: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Orquestra downloads e processamentos por ano")
-    parser.add_argument("--anos", nargs="+", default=["2026"], help="Anos a processar (ex: 2026 2022 2018)")
+    parser.add_argument("--anos", nargs="+", default=["2026"], help="Anos a processar (ex: 2014 2018 2022 2026)")
     parser.add_argument("--ufs", nargs="*", default=[], help="UFs específicas (opcional)")
     parser.add_argument("--skip-download", action="store_true", help="Pula todos os downloads")
     parser.add_argument("--skip-preprocess", action="store_true", help="Pula pré-processamento")
@@ -56,6 +57,9 @@ def main():
         if "2018" in anos:
             run([sys.executable, "scripts/download_bu_2018.py"], "Download BUs 2018")
 
+        if "2014" in anos:
+            run([sys.executable, "scripts/download_bu_2014.py"], "Download BUs 2014")
+
         if "2022" in anos:
             run([sys.executable, "scripts/download_bu_2022.py"], "Download BUs 2022")
 
@@ -72,7 +76,7 @@ def main():
     # Pré-processamento
     if not args.skip_preprocess:
         for ano in anos:
-            if ano in ("2026", "2022", "2018"):
+            if ano in ("2026", "2022", "2018", "2014"):
                 run([sys.executable, "scripts/preprocess_bu.py", "--ano", ano], f"Pré-processar BUs {ano}")
 
     # Residual por ano + comparação
@@ -89,7 +93,7 @@ def main():
     # Cruzamento socioeconômico (IDH + transferências federais)
     if not args.skip_socio:
         for ano in anos:
-            if ano in ("2026", "2022", "2018"):
+            if ano in ("2026", "2022", "2018", "2014"):
                 run([sys.executable, "scripts/cruzar_socioeconomico.py", "--ano", ano], f"Cruzamento socioeconômico {ano}")
 
     # Benchmark de ML. Roda por último: um erro aqui não interrompe o que veio antes,

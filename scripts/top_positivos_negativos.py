@@ -11,7 +11,7 @@ N = 15  # quantas de cada lado
 
 def main():
     lines = []
-    for ano in ("2018", "2022", "2026"):
+    for ano in ("2014", "2018", "2022", "2026"):
         p = RESULTS / f"top2pct_urnas_{ano}.csv"
         if not p.exists():
             lines.append(f"\n{ano}: arquivo não encontrado")

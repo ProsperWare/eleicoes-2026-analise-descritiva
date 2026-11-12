@@ -7,6 +7,7 @@ Uso:
   python scripts/preprocess_bu.py --ano 2026
   python scripts/preprocess_bu.py --ano 2022
   python scripts/preprocess_bu.py --ano 2018
+  python scripts/preprocess_bu.py --ano 2014
 """
 
 import argparse
@@ -203,7 +204,7 @@ def process_year(ano: str):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ano", required=True, choices=["2026", "2022", "2018"])
+    parser.add_argument("--ano", required=True, choices=["2026", "2022", "2018", "2014"])
     args = parser.parse_args()
     process_year(args.ano)
     print(f"\nPré-processamento de {args.ano} concluído.")

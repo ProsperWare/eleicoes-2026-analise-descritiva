@@ -42,4 +42,25 @@ python scripts/process_and_summarize.py
 
 Os arquivos crus ficam em `data/raw/`. Qualquer resultado processado deve ser gravado em `resultados/`.
 
+## Processo compartilhado de estudos (handoff entre pessoas/agentes)
+
+Cada estudo deve ter um manifesto em `estudos/<study_id>/study.yaml` e um handoff em
+`estudos/<study_id>/HANDOFF.md`.
+
+Execucao padronizada:
+
+```bash
+python scripts/run_study.py --study-id baseline-linear-residual
+```
+
+Esse comando:
+
+- lê o manifesto (`study.yaml`) e monta o comando do `orquestrar.py`
+- executa o pipeline
+- grava metadados em `resultados/estudos/<study_id>/run.json`
+- copia um snapshot dos artefatos para
+  `resultados/estudos/<study_id>/snapshots/<run_tag>/`
+
+Isso permite continuidade da pesquisa com contexto minimo: manifesto + handoff + run.json.
+
 Este repositório é para análise descritiva dos dados públicos. Não assume modificação de resultados.

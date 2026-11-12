@@ -1,0 +1,28 @@
+# Manifesto de estudo compartilhado
+study_id: baseline-linear-residual
+owner: equipe
+status: active
+
+# Escopo principal
+anos: [2014, 2018, 2022, 2026]
+ufs: []
+
+# Flags do orquestrador
+skip_download: false
+skip_preprocess: false
+skip_residual: false
+skip_socio: false
+skip_benchmark: false
+
+# Copia para resultados/estudos/<study_id>/snapshots/<run_tag>/
+output_patterns:
+  - top2pct_urnas_*.csv
+  - comparacao_top2pct.txt
+  - intersecao_3anos*.txt
+  - intersecao_3anos.csv
+  - top_positivos_negativos.txt
+  - residual_*.csv
+  - residual_*.txt
+  - benchmark_modelos*.csv
+  - benchmark_modelos.md
+  - residual_ml_*.parquet

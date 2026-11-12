@@ -70,13 +70,13 @@ jobs:
           fi
 
       - name: Orquestrar processamento
-        run: python scripts/orquestrar.py --anos 2026 2022 2018
+        run: python scripts/run_study.py --study-id baseline-linear-residual
 
       - name: Commit resultados
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add resultados/
+          git add resultados/ estudos/
           if git diff --staged --quiet; then
             echo "Nada para commitar em resultados/"
           else

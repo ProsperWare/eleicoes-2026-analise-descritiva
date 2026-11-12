@@ -49,7 +49,7 @@ print = functools.partial(print, flush=True)
 
 PROCESSED_PADRAO = Path("/home/alexa/eleicoes-data/processed")
 RESULTS_PADRAO = Path("resultados")
-ANOS_VALIDOS = ("2018", "2022", "2026")
+ANOS_VALIDOS = ("2014", "2018", "2022", "2026")
 
 MIN_TREINO = 40
 MIN_AVAL = 15
