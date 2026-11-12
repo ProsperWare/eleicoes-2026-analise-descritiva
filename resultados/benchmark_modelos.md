@@ -65,7 +65,7 @@ A escolha usa a validação B. O número do teste A é o holdout (Grupo A, múlt
 
 Seções no recorte do logit base: Grupo A (teste) 121460, Grupo B (validação) 122323, Grupo C (treino) 122437. Peso: `QT_APTOS_t2`. UFs no agregado: 26.
 
-Tempo de parede: 315.0 s.
+Tempo de parede: 421.8 s.
 
 ### Experimento `base`
 
@@ -141,7 +141,7 @@ Ganho positivo significa RMSE ponderado menor que o logit do mesmo experimento. 
 
 Seções no recorte do logit base: Grupo A (teste) 91983, Grupo B (validação) 92591, Grupo C (treino) 92655. Peso: `QT_APTOS_t2`. UFs no agregado: 19.
 
-Tempo de parede: 241.9 s.
+Tempo de parede: 315.4 s.
 
 ### Experimento `base`
 
@@ -210,7 +210,7 @@ Ganho positivo significa RMSE ponderado menor que o logit do mesmo experimento. 
 
 Seções no recorte do logit base: Grupo A (teste) 156496, Grupo B (validação) 157532, Grupo C (treino) 157420. Peso: `QT_APTOS_t2`. UFs no agregado: 28.
 
-Tempo de parede: 396.7 s.
+Tempo de parede: 547.9 s.
 
 ### Experimento `base`
 

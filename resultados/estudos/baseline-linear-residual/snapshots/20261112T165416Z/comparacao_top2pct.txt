@@ -1,0 +1,10 @@
+=== Comparação Top 2% entre anos ===
+
+2018 ∩ 2022: 118 seções em comum no top 2%
+  (4895 em 2018, 3704 em 2022)
+
+2018 ∩ 2026: 191 seções em comum no top 2%
+  (4895 em 2018, 6299 em 2026)
+
+2022 ∩ 2026: 200 seções em comum no top 2%
+  (3704 em 2022, 6299 em 2026)

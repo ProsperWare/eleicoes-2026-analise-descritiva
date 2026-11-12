@@ -36,48 +36,31 @@ Fontes não baixadas automaticamente: SIOPS, SIOPE, repasse FNDE/FUNDEB, Transfe
 Motivo: não há API em massa sem autenticação (ou o arquivo do portal é HTML/403 ou multi-GB). Se o CSV estiver em SOCIO_LOCAL_DIR, fora de raw/, ele entra.
 
 residual_mean_unweighted              0.993056
-emendas_valor_pago_bienio_pc          0.095621
-emendas_valor_pago_eleicao_pc         0.078882
-emendas_valor_pago_ano_anterior_pc    0.059885
+emendas_valor_pago_bienio_pc          0.110754
+emendas_valor_pago_eleicao_pc         0.097420
+emendas_valor_pago_ano_anterior_pc    0.067075
 transferencia_per_capita              0.042954
-siconfi_receita_transferida_pc        0.015570
 bolsa_beneficiarios_por_eleitor       0.010894
 idhm_l                                0.004669
-siconfi_despesa_educacao_pc           0.001759
-emendas_valor_pago_eleicao           -0.002013
-siconfi_receita_propria              -0.004015
-siconfi_despesa_saude_pc             -0.004303
+emendas_valor_pago_eleicao           -0.004288
 idhm_r                               -0.004439
-siconfi_despesa_total_pc             -0.007291
 n_eleitores                          -0.013748
 pop                                  -0.013846
 n_comparecimento                     -0.013899
 n_secoes                             -0.014932
-siconfi_despesa_urbanismo            -0.015718
-siconfi_receita_transferida          -0.016594
-siconfi_despesa_total                -0.018042
 bolsa_n_beneficiarios                -0.018799
 bolsa_valor_parcela                  -0.018885
-emendas_valor_pago_bienio            -0.020124
 bolsa_valor_per_capita               -0.020551
-siconfi_despesa_saude                -0.020696
-siconfi_despesa_educacao             -0.020818
-siconfi_despesa_assistencia          -0.021324
 transferencia_liquida                -0.022029
 bolsa_beneficiarios_por_hab          -0.022490
-siconfi_despesa_urbanismo_pc         -0.023591
+emendas_valor_pago_bienio            -0.023101
 idhm                                 -0.024343
-emendas_valor_pago_ano_anterior      -0.025347
-siconfi_despesa_assistencia_pc       -0.029657
+emendas_valor_pago_ano_anterior      -0.028181
 idhm_e                               -0.045303
-siconfi_receita_propria_pc           -0.047443
-siconfi_receita_fundeb                     NaN
-siconfi_receita_fundeb_pc                  NaN
 
 N municípios: 5553
 Match crosswalk: {'codigo': 5552, 'sem_match': 1}
 Match IDHM: {'codigo': 5547, 'sem_match': 6}
 Match transferências: {'codigo': 5551, 'sem_match': 2}
 Match Bolsa Família: {'codigo': 5552, 'sem_match': 1}
-Match Siconfi: {'sem_match': 3179, 'codigo': 2374}
-Match emendas: {'sem_match': 4750, 'codigo': 803}
+Match emendas: {'sem_match': 4744, 'codigo': 809}

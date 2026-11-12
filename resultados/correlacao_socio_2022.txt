@@ -40,44 +40,27 @@ idhm_l                                0.076755
 idhm                                  0.076401
 idhm_r                                0.075973
 idhm_e                                0.063229
-siconfi_receita_fundeb                0.016306
 bolsa_valor_parcela                   0.015093
-siconfi_despesa_educacao              0.014657
 bolsa_n_beneficiarios                 0.014649
 pop                                   0.013809
 n_secoes                              0.013805
 n_comparecimento                      0.013364
 n_eleitores                           0.012974
 emendas_valor_pago_ano_anterior       0.012718
-siconfi_despesa_total                 0.012476
-siconfi_receita_transferida           0.011541
-siconfi_despesa_saude                 0.011521
-siconfi_despesa_urbanismo             0.010973
 emendas_valor_pago_bienio             0.010392
-siconfi_receita_propria               0.009677
-siconfi_receita_transferida_pc        0.008469
 transferencia_liquida                 0.008017
 emendas_valor_pago_eleicao            0.005472
-siconfi_despesa_assistencia           0.005290
 transferencia_per_capita              0.000820
-siconfi_receita_fundeb_pc            -0.007875
-siconfi_receita_propria_pc           -0.021440
-siconfi_despesa_educacao_pc          -0.028192
-emendas_valor_pago_ano_anterior_pc   -0.031515
-siconfi_despesa_urbanismo_pc         -0.031840
+emendas_valor_pago_ano_anterior_pc   -0.029449
 bolsa_beneficiarios_por_eleitor      -0.035604
-siconfi_despesa_total_pc             -0.038264
-siconfi_despesa_assistencia_pc       -0.045846
 bolsa_valor_per_capita               -0.046179
 bolsa_beneficiarios_por_hab          -0.051445
-siconfi_despesa_saude_pc             -0.053552
-emendas_valor_pago_bienio_pc         -0.058835
-emendas_valor_pago_eleicao_pc        -0.063144
+emendas_valor_pago_bienio_pc         -0.053787
+emendas_valor_pago_eleicao_pc        -0.055863
 
 N municípios: 3652
 Match crosswalk: {'codigo': 3652}
 Match IDHM: {'codigo': 3650, 'sem_match': 2}
 Match transferências: {'codigo': 3651, 'sem_match': 1}
 Match Bolsa Família: {'codigo': 3652}
-Match Siconfi: {'sem_match': 2024, 'codigo': 1628}
 Match emendas: {'sem_match': 2681, 'codigo': 971}

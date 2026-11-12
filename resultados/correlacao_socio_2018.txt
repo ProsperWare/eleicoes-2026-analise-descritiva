@@ -37,30 +37,47 @@ Motivo: não há API em massa sem autenticação (ou o arquivo do portal é HTML
 
 residual_mean_unweighted              0.991330
 idhm_r                                0.019657
+siconfi_despesa_educacao_pc           0.017530
 bolsa_beneficiarios_por_eleitor       0.010569
+siconfi_despesa_educacao              0.007082
 idhm_l                                0.006663
 idhm                                  0.006151
+siconfi_despesa_total_pc              0.005247
+siconfi_despesa_total                 0.002724
+siconfi_despesa_saude                 0.002438
+siconfi_despesa_urbanismo             0.000470
 pop                                  -0.001555
 n_comparecimento                     -0.001776
 n_eleitores                          -0.001947
 n_secoes                             -0.002068
+siconfi_despesa_assistencia          -0.002393
 bolsa_valor_parcela                  -0.002762
 bolsa_n_beneficiarios                -0.002863
 transferencia_liquida                -0.005402
 idhm_e                               -0.005904
-emendas_valor_pago_eleicao_pc        -0.013861
-emendas_valor_pago_ano_anterior_pc   -0.014705
+siconfi_despesa_saude_pc             -0.008173
+emendas_valor_pago_eleicao_pc        -0.013985
+emendas_valor_pago_ano_anterior_pc   -0.016325
 emendas_valor_pago_eleicao           -0.016908
 transferencia_per_capita             -0.016977
 emendas_valor_pago_ano_anterior      -0.018787
-emendas_valor_pago_bienio_pc         -0.019262
+emendas_valor_pago_bienio_pc         -0.020618
 emendas_valor_pago_bienio            -0.021005
 bolsa_beneficiarios_por_hab          -0.031156
 bolsa_valor_per_capita               -0.031566
+siconfi_despesa_assistencia_pc       -0.041865
+siconfi_despesa_urbanismo_pc         -0.072014
+siconfi_receita_propria                    NaN
+siconfi_receita_propria_pc                 NaN
+siconfi_receita_transferida                NaN
+siconfi_receita_transferida_pc             NaN
+siconfi_receita_fundeb                     NaN
+siconfi_receita_fundeb_pc                  NaN
 
 N municípios: 5395
 Match crosswalk: {'codigo': 5395}
 Match IDHM: {'codigo': 5390, 'sem_match': 5}
 Match transferências: {'codigo': 5394, 'sem_match': 1}
 Match Bolsa Família: {'codigo': 5395}
+Match Siconfi: {'sem_match': 3395, 'codigo': 2000}
 Match emendas: {'codigo': 3421, 'sem_match': 1974}
